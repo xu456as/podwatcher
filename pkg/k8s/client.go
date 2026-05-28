@@ -19,12 +19,6 @@ func NewClient(kubeconfigPath string) (*Client, error) {
 	var config *rest.Config
 	var err error
 
-	if kubeconfigPath == "" {
-		if home := homedir.HomeDir(); home != "" {
-			kubeconfigPath = filepath.Join(home, ".kube", "config")
-		}
-	}
-
 	if kubeconfigPath != "" {
 		klog.Infof("Using kubeconfig: %s", kubeconfigPath)
 		config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
@@ -32,10 +26,24 @@ func NewClient(kubeconfigPath string) (*Client, error) {
 			return nil, err
 		}
 	} else {
-		klog.Info("Using in-cluster config")
+		// 优先使用 in-cluster config（Pod 内运行时）
 		config, err = rest.InClusterConfig()
 		if err != nil {
-			return nil, err
+			// in-cluster 失败，回退到本地 kubeconfig
+			if home := homedir.HomeDir(); home != "" {
+				kubeconfigPath = filepath.Join(home, ".kube", "config")
+			}
+			if kubeconfigPath != "" {
+				klog.Infof("In-cluster config failed, using kubeconfig: %s", kubeconfigPath)
+				config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				return nil, err
+			}
+		} else {
+			klog.Info("Using in-cluster config")
 		}
 	}
 

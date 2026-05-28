@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"podwatcher/internal/handler"
 	"podwatcher/pkg/k8s"
@@ -67,4 +68,29 @@ func (s *PodService) GetPodCountByPhase(ctx context.Context, namespace string) (
 	}
 
 	return counts, nil
+}
+
+func (s *PodService) GetSparkApplicationsByTimeRange(startTime, endTime string) ([]handler.SparkApplication, error) {
+	var start, end time.Time
+	var err error
+
+	if startTime != "" {
+		start, err = time.Parse(time.RFC3339, startTime)
+		if err != nil {
+			return nil, fmt.Errorf("invalid startTime format, use RFC3339: %w", err)
+		}
+	} else {
+		start = time.Now().Add(-24 * time.Hour)
+	}
+
+	if endTime != "" {
+		end, err = time.Parse(time.RFC3339, endTime)
+		if err != nil {
+			return nil, fmt.Errorf("invalid endTime format, use RFC3339: %w", err)
+		}
+	} else {
+		end = time.Now()
+	}
+
+	return s.eventHandler.GetSparkApps(start, end), nil
 }

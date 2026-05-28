@@ -1,0 +1,125 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: podwatcher
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: podwatcher
+  namespace: podwatcher
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: podwatcher
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: podwatcher
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: podwatcher
+subjects:
+  - kind: ServiceAccount
+    name: podwatcher
+    namespace: podwatcher
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: podwatcher-config
+  namespace: podwatcher
+data:
+  config.yaml: |
+    log:
+      file: "/var/log/podwatcher/podwatcher.log"
+      maxSize: 100
+      maxNum: 5
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: podwatcher
+  namespace: podwatcher
+  labels:
+    app: podwatcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: podwatcher
+  template:
+    metadata:
+      labels:
+        app: podwatcher
+    spec:
+      serviceAccountName: podwatcher
+      containers:
+        - name: podwatcher
+          image: sonic_lw:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PODWATCHER_CONFIG
+              value: "/app/config/config.yaml"
+            - name: LOG_MAX_SIZE
+              value: "100M"
+            - name: LOG_ROTATE_INTERVAL
+              value: "5min"
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: log
+              mountPath: /var/log/podwatcher
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: podwatcher-config
+        - name: log
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: podwatcher
+  namespace: podwatcher
+spec:
+  selector:
+    app: podwatcher
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+  type: ClusterIP

@@ -87,6 +87,24 @@ func (c *PodController) GetPodStats(ctx *gin.Context) {
 	})
 }
 
+func (c *PodController) GetSparkApplications(ctx *gin.Context) {
+	startTime := ctx.Query("startTime")
+	endTime := ctx.Query("endTime")
+
+	apps, err := c.podService.GetSparkApplicationsByTimeRange(startTime, endTime)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"applications": apps,
+		"totalCount":   len(apps),
+	})
+}
+
 func (c *PodController) HealthCheck(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{
 		"status":  "healthy",

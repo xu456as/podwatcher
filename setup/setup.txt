@@ -24,7 +24,7 @@ helm install spark-operator spark-operator/spark-operator \
  --create-namespace \
  --set controller.batchScheduler.enable=true \
  --set controller.batchScheduler.default=yunikorn
-kubectl apply -f spark-pi.yaml
+kubectl apply -f spark-pi.yml
 
 export k8s cluster config so that it can be read from podwatcher
 kind export kubeconfig --name yunikorn-cluster --kubeconfig ~/.kube/kind-config

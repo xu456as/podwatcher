@@ -1,0 +1,11 @@
+apiVersion: v2
+name: podwatcher
+description: A Helm chart for PodWatcher
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - podwatcher
+  - logging
+  - k8s
+  - helm

@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.name }}
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.name }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: {{ .Values.name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          env:
+            - name: PODWATCHER_CONFIG
+              value: "{{ .Values.env.PODWATCHER_CONFIG }}"
+            - name: LOG_MAX_SIZE
+              value: "{{ .Values.env.LOG_MAX_SIZE }}"
+            - name: LOG_ROTATE_INTERVAL
+              value: "{{ .Values.env.LOG_ROTATE_INTERVAL }}"
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: log
+              mountPath: /var/log/podwatcher
+            - name: logrotate
+              mountPath: /etc/logrotate.d/podwatcher
+              subPath: logrotate.conf
+              readOnly: true
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Values.name }}-config
+        - name: log
+          emptyDir: {}
+        - name: logrotate
+          configMap:
+            name: {{ .Values.name }}-logrotate

@@ -1,0 +1,42 @@
+namespace: podwatcher
+createNamespace: true
+name: podwatcher
+replicaCount: 1
+image:
+  repository: sonic_lw
+  tag: latest
+  pullPolicy: Never
+serviceAccount:
+  create: true
+  name: podwatcher
+service:
+  type: ClusterIP
+  port: 8080
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+env:
+  PODWATCHER_CONFIG: "/app/config/config.yaml"
+  LOG_MAX_SIZE: "100M"
+  LOG_ROTATE_INTERVAL: "5min"
+config:
+  log:
+    file: "/var/log/podwatcher/podwatcher.log"
+    maxSize: 100
+    maxNum: 5
+logrotate:
+  conf: |-
+    /var/log/podwatcher/podwatcher.log {
+        rotate 3
+        maxsize {{ .Values.env.LOG_MAX_SIZE }}
+        copytruncate
+        compress
+        missingok
+        notifempty
+        dateext
+        dateformat -%Y%m%d-%s
+    }

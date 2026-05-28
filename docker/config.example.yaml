@@ -1,0 +1,13 @@
+#   1. command parameter: ./podwatcher -config=config.yaml
+#   2. env:  PODWATCHER_CONFIG=config.yaml ./podwatcher
+#
+# env > config file
+
+log:
+  # env: PODWATCHER_LOG_FILE
+  file: "/var/log/podwatcher/podwatcher.log"
+
+  # max size of each log file
+  maxSize: 100
+
+  maxNum: 5
