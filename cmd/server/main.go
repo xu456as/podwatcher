@@ -21,9 +21,11 @@ import (
 	"podwatcher/internal/prometheus"
 	"podwatcher/internal/service"
 	"podwatcher/internal/store"
+	"podwatcher/internal/telemetry"
 	"podwatcher/pkg/k8s"
 
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"k8s.io/klog/v2"
 )
 
@@ -61,6 +63,20 @@ func main() {
 	}
 
 	defer klog.Flush()
+
+	shutdownTracer, err := telemetry.InitTracer(context.Background(), cfg.Tracing.Endpoint, "podwatcher")
+	if err != nil {
+		klog.Fatalf("Failed to initialize tracer: %v", err)
+	}
+	shutdownMeter, err := telemetry.InitMeter(context.Background(), cfg.Tracing.Endpoint, "podwatcher")
+	if err != nil {
+		klog.Fatalf("Failed to initialize meter provider: %v", err)
+	}
+	if cfg.Tracing.Endpoint == "" {
+		klog.Info("OpenTelemetry tracing/metrics disabled: tracing.endpoint is empty")
+	} else {
+		klog.Infof("OpenTelemetry tracing and metrics enabled (endpoint=%s)", cfg.Tracing.Endpoint)
+	}
 
 	k8sClient, err := k8s.NewClient(*kubeconfig)
 	if err != nil {
@@ -154,6 +170,14 @@ func main() {
 		klog.Errorf("Server forced to shutdown: %v", err)
 	}
 
+	if err := shutdownTracer(ctx); err != nil {
+		klog.Errorf("Failed to flush tracer: %v", err)
+	}
+
+	if err := shutdownMeter(ctx); err != nil {
+		klog.Errorf("Failed to flush metrics: %v", err)
+	}
+
 	klog.Info("Server exited")
 }
 
@@ -214,6 +238,7 @@ func setupRouter(podController *controller.PodController, promGateway *controlle
 
 	router.Use(gin.Recovery())
 	router.Use(gin.Logger())
+	router.Use(otelgin.Middleware("podwatcher"))
 
 	api := router.Group("/api/v1")
 	{

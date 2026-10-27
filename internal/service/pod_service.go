@@ -11,9 +11,14 @@ import (
 	"podwatcher/internal/store"
 	"podwatcher/pkg/k8s"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+var tracer = otel.Tracer("podwatcher/service")
 
 type PodService struct {
 	k8sClient    *k8s.Client
@@ -28,6 +33,17 @@ func NewPodService(k8sClient *k8s.Client, eventHandler *handler.PodEventHandler)
 }
 
 func (s *PodService) ListPods(ctx context.Context, namespace string, labelSelector string) ([]corev1.Pod, error) {
+	ctx, span := tracer.Start(ctx, "PodService.ListPods")
+	defer span.End()
+
+	if namespace == "" {
+		namespace = metav1.NamespaceAll
+	}
+	span.SetAttributes(
+		attribute.String("k8s.namespace", namespace),
+		attribute.String("k8s.label_selector", labelSelector),
+	)
+
 	opts := metav1.ListOptions{}
 
 	if labelSelector != "" {
@@ -36,15 +52,28 @@ func (s *PodService) ListPods(ctx context.Context, namespace string, labelSelect
 
 	pods, err := s.k8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, opts)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "list pods failed")
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
 
+	span.SetAttributes(attribute.Int("k8s.pod_count", len(pods.Items)))
 	return pods.Items, nil
 }
 
 func (s *PodService) GetPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
+	ctx, span := tracer.Start(ctx, "PodService.GetPod")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("k8s.namespace", namespace),
+		attribute.String("k8s.pod_name", name),
+	)
+
 	pod, err := s.k8sClient.Clientset.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "get pod failed")
 		return nil, fmt.Errorf("failed to get pod: %w", err)
 	}
 
