@@ -474,6 +474,7 @@ func containerTimes(pod *corev1.Pod) (started, finished *time.Time) {
 // cascades the deletion to every pod owned by them, all in the same critical
 // section. It returns the number of evicted applications.
 func (s *Store) evictAppsLocked() int {
+	defer measureFunc("Store.evictAppsLocked")()
 	evicted := 0
 	for len(s.apps) > s.maxApps {
 		var oldestID string
@@ -494,6 +495,7 @@ func (s *Store) evictAppsLocked() int {
 		s.deleteAppLocked(oldestID)
 		evicted++
 	}
+	recordAppEvictions(evicted)
 	return evicted
 }
 
@@ -502,11 +504,14 @@ func (s *Store) evictAppsLocked() int {
 func (s *Store) deleteAppLocked(appID string) {
 	delete(s.apps, appID)
 	delete(s.driverByApp, appID)
+	cascaded := 0
 	for key, rec := range s.pods {
 		if rec.ApplicationID == appID {
 			delete(s.pods, key)
+			cascaded++
 		}
 	}
+	recordPodCascadeDeletes(cascaded)
 }
 
 // evictPodsLocked removes over-limit deleted pod records oldest-first. A live
@@ -514,6 +519,7 @@ func (s *Store) deleteAppLocked(appID string) {
 // application no longer exists are eligible. It returns the number removed and
 // warns once per overflow episode when no reclaimable record remains.
 func (s *Store) evictPodsLocked() int {
+	defer measureFunc("Store.evictPodsLocked")()
 	removed := 0
 	if len(s.pods) <= s.maxPods {
 		s.overLimitWarned = false
@@ -554,6 +560,7 @@ func (s *Store) evictPodsLocked() int {
 	} else {
 		s.overLimitWarned = false
 	}
+	recordPodEvictions(removed)
 	return removed
 }
 
@@ -712,6 +719,7 @@ func (s *Store) load() {
 		s.dirty = true
 	}
 	s.mu.Unlock()
+	recordStoreSizes(len(s.apps), len(s.pods))
 	klog.Infof("Loaded %d applications and %d pod records from %s", len(snapshot.Applications), len(snapshot.Pods), s.filePath)
 }
 
@@ -802,6 +810,7 @@ func (s *Store) save() {
 		s.mu.Unlock()
 		return
 	}
+	defer measureFunc("Store.save")()
 	s.dirty = false
 	snapshot := stateSnapshot{
 		Version:      1,
@@ -814,28 +823,35 @@ func (s *Store) save() {
 	for _, rec := range s.pods {
 		snapshot.Pods = append(snapshot.Pods, *rec)
 	}
+	recordStoreSizes(len(snapshot.Applications), len(snapshot.Pods))
 	s.mu.Unlock()
 
 	if dir := filepath.Dir(s.filePath); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			klog.Warningf("Failed to create state dir %s: %v", dir, err)
+			recordSaveFailure()
 			return
 		}
 	}
 
 	data, err := json.Marshal(snapshot)
 	if err != nil {
+		recordSaveFailure()
 		return
 	}
 
 	tmp := s.filePath + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		klog.Warningf("Failed to write state file: %v", err)
+		recordSaveFailure()
 		return
 	}
 	if err := os.Rename(tmp, s.filePath); err != nil {
 		klog.Warningf("Failed to finalize state file: %v", err)
+		recordSaveFailure()
+		return
 	}
+	recordSaveBytes(len(data))
 }
 
 // SparkRole returns the spark-role label (driver/executor) when the pod
