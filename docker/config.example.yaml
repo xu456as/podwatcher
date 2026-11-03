@@ -74,3 +74,54 @@ elasticsearch:
   # this variable must exist in the container and contain a non-empty password.
   passwordEnv: "ES_PASSWORD"
   index: "podwatcher-events"
+
+# Async exporter writing a deleted Spark pod's (driver or executor) Prometheus
+# metrics back to Elasticsearch. Requires elasticsearch.address and
+# prometheus.address. The pending queue depth is reported to the OTel
+# collector as podwatcher.podmetrics.queue.depth.
+podMetricsExport:
+  # Pending pod exports buffered before new ones are dropped; dropped pods
+  # lose their export, while the raw samples stay queryable in Prometheus
+  queueSize: 256
+  # Concurrent export workers; each export runs one Prometheus range query
+  # per entry in queries plus one Elasticsearch index request
+  workers: 2
+  # Sampling step of the lifecycle range queries
+  stepSeconds: 60
+  # Export name -> query; each entry has an expr (PromQL template where
+  # {namespace} and {pod} are substituted per deleted pod) and an optional
+  # accumulate flag (replace per-step values with their running integral
+  # value x stepSeconds, e.g. gauge MB -> cumulative MB-seconds). Entries
+  # merge with the built-in defaults, so adding one entry exports one more
+  # metric; redefining a built-in name overrides it. Remove an export by
+  # restating the full desired map.
+  queries:
+    # All templates pin container="main" (the Spark main container's name);
+    # each query returns a single series. Pods with a differently named main
+    # container produce no data — override templates as needed.
+    cpuUsage:
+      expr: 'rate(container_cpu_usage_seconds_total{namespace="{namespace}",pod="{pod}",container="main"}[5m])'
+    # Cumulative CPU core-seconds; the last point is the lifetime total
+    cpuVcoreSeconds:
+      expr: 'container_cpu_usage_seconds_total{namespace="{namespace}",pod="{pod}",container="main"}'
+    memoryWorkingSet:
+      expr: 'container_memory_working_set_bytes{namespace="{namespace}",pod="{pod}",container="main"}'
+    # Cumulative MB-seconds, the counterpart of cpuVcoreSeconds
+    memoryMbSeconds:
+      expr: 'container_memory_working_set_bytes{namespace="{namespace}",pod="{pod}",container="main"} / 1024 / 1024'
+      accumulate: true
+    fsUsage:
+      expr: 'container_fs_usage_bytes{namespace="{namespace}",pod="{pod}",container="main"}'
+    resourceRequests:
+      expr: 'kube_pod_container_resource_requests{namespace="{namespace}",pod="{pod}",container="main"}'
+    resourceLimits:
+      expr: 'kube_pod_container_resource_limits{namespace="{namespace}",pod="{pod}",container="main"}'
+    # Useful additions:
+    # cpuThrottledPeriods:
+    #   expr: 'sum by (container) (rate(container_cpu_cfs_throttled_periods_total{namespace="{namespace}",pod="{pod}"}[5m]))'
+    # memoryMax:
+    #   expr: 'container_memory_max_usage_bytes{namespace="{namespace}",pod="{pod}"}'
+    # networkReceive:
+    #   expr: 'sum by (pod) (rate(container_network_receive_bytes_total{namespace="{namespace}",pod="{pod}"}[5m]))'
+    # networkTransmit: 'sum by (pod) (rate(container_network_transmit_bytes_total{namespace="{namespace}",pod="{pod}"}[5m]))'
+    # restarts: 'max by (container) (kube_pod_container_status_restarts_total{namespace="{namespace}",pod="{pod}"})'

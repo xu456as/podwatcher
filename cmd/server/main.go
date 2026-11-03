@@ -18,6 +18,7 @@ import (
 	"podwatcher/internal/elasticsearch"
 	"podwatcher/internal/handler"
 	"podwatcher/internal/informer"
+	"podwatcher/internal/podmetrics"
 	"podwatcher/internal/prometheus"
 	"podwatcher/internal/service"
 	"podwatcher/internal/store"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -102,16 +104,53 @@ func main() {
 			filepath.Join(stateDir, "pod-records.json"),
 		)
 	}
+	// One Prometheus client serves both the query gateway and the driver pod
+	// metrics exporter.
+	promClient := prometheus.NewClient(prometheus.Config{
+		Address:            cfg.Prometheus.Address,
+		Token:              cfg.Prometheus.Token,
+		TimeoutSeconds:     cfg.Prometheus.TimeoutSeconds,
+		InsecureSkipVerify: cfg.Prometheus.InsecureSkipVerify,
+	})
+
 	var handlerOptions []handler.Option
+	var esPublisher *elasticsearch.Client
 	if cfg.Elasticsearch.Address != "" {
 		publisher, err := elasticsearch.NewClient(cfg.Elasticsearch, clusterName)
 		if err != nil {
 			klog.Fatalf("Failed to configure Elasticsearch: %v", err)
 		}
-		handlerOptions = append(handlerOptions, handler.WithPublisher(publisher), handler.WithDebug(cfg.Elasticsearch.IsDebug))
+		esPublisher = publisher
+		handlerOptions = append(handlerOptions, handler.WithDebug(cfg.Elasticsearch.IsDebug))
 		klog.Infof("Elasticsearch publishing enabled: index=%s timeoutSeconds=%d isDebug=%t insecureSkipVerify=%t", cfg.Elasticsearch.Index, cfg.Elasticsearch.TimeoutSeconds, cfg.Elasticsearch.IsDebug, cfg.Elasticsearch.InsecureSkipVerify)
 	} else {
 		klog.Warning("Elasticsearch publishing disabled: elasticsearch.address is empty; check the loaded config file")
+	}
+
+	// Deleting a Spark pod triggers an async export of its Prometheus
+	// metrics back to Elasticsearch; it needs both endpoints configured,
+	// otherwise the handler runs without the metrics capability.
+	var podMetricsExporter *podmetrics.Exporter
+	switch {
+	case esPublisher == nil:
+		klog.Warning("Pod metrics export disabled: elasticsearch.address is empty")
+	case cfg.Prometheus.Address == "":
+		klog.Warning("Pod metrics export disabled: prometheus.address is empty")
+		handlerOptions = append(handlerOptions, handler.WithPublisher(esPublisher))
+	default:
+		queries := make(map[string]podmetrics.QuerySpec, len(cfg.PodMetricsExport.Queries))
+		for name, q := range cfg.PodMetricsExport.Queries {
+			queries[name] = podmetrics.QuerySpec{Expr: q.Expr, Accumulate: q.Accumulate}
+		}
+		podMetricsExporter = podmetrics.NewExporter(promClient, esPublisher,
+			podmetrics.WithQueueSize(cfg.PodMetricsExport.QueueSize),
+			podmetrics.WithWorkers(cfg.PodMetricsExport.WorkerCount),
+			podmetrics.WithStep(time.Duration(cfg.PodMetricsExport.StepSeconds)*time.Second),
+			podmetrics.WithQueries(queries),
+		)
+		handlerOptions = append(handlerOptions, handler.WithPublisher(&compositePublisher{events: esPublisher, podMetrics: podMetricsExporter}))
+		klog.Infof("Pod metrics export enabled: prometheus=%s stepSeconds=%d queries=%d queueSize=%d workers=%d",
+			cfg.Prometheus.Address, cfg.PodMetricsExport.StepSeconds, len(cfg.PodMetricsExport.Queries), cfg.PodMetricsExport.QueueSize, cfg.PodMetricsExport.WorkerCount)
 	}
 	eventHandler := handler.NewPodEventHandler(stateStore, handlerOptions...)
 
@@ -128,12 +167,7 @@ func main() {
 
 	// The Prometheus gateway is always registered; an incomplete configuration
 	// is reported to gateway requests instead of failing startup.
-	promGateway := controller.NewPrometheusGateway(prometheus.NewClient(prometheus.Config{
-		Address:            cfg.Prometheus.Address,
-		Token:              cfg.Prometheus.Token,
-		TimeoutSeconds:     cfg.Prometheus.TimeoutSeconds,
-		InsecureSkipVerify: cfg.Prometheus.InsecureSkipVerify,
-	}))
+	promGateway := controller.NewPrometheusGateway(promClient)
 	if cfg.Prometheus.Address == "" {
 		klog.Warning("Prometheus gateway is not configured (prometheus.address is empty); /api/v1/prometheus/query_range requests will fail")
 	} else {
@@ -164,6 +198,9 @@ func main() {
 	defer cancel()
 
 	podInformerManager.Stop()
+	if podMetricsExporter != nil {
+		podMetricsExporter.Stop()
+	}
 	stateStore.Stop()
 
 	if err := srv.Shutdown(ctx); err != nil {
@@ -179,6 +216,26 @@ func main() {
 	}
 
 	klog.Info("Server exited")
+}
+
+// compositePublisher fans the handler's optional publisher probes out to
+// their implementations: pod and application events go to Elasticsearch,
+// deleted Spark pods go to the async metrics exporter.
+type compositePublisher struct {
+	events     *elasticsearch.Client
+	podMetrics *podmetrics.Exporter
+}
+
+func (c *compositePublisher) Publish(ctx context.Context, kind string, pod *corev1.Pod, initial bool) error {
+	return c.events.Publish(ctx, kind, pod, initial)
+}
+
+func (c *compositePublisher) PublishApplication(ctx context.Context, app store.ApplicationView) error {
+	return c.events.PublishApplication(ctx, app)
+}
+
+func (c *compositePublisher) PublishPodMetrics(ctx context.Context, pod *corev1.Pod) error {
+	return c.podMetrics.PublishPodMetrics(ctx, pod)
 }
 
 // buildResumeStore selects the resourceVersion checkpoint backend: an HTTP

@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"podwatcher/internal/config"
+	"podwatcher/internal/podmetrics"
+	"podwatcher/internal/prometheus"
 	"podwatcher/internal/store"
 	"podwatcher/internal/testutil"
 
@@ -497,6 +499,37 @@ func TestPublishOmitsManagedFields(t *testing.T) {
 	}
 	if calls != 3 || len(pod.ManagedFields) != 1 || pod.ManagedFields[0].FieldsV1 == nil {
 		t.Fatal("publishing must preserve the original pod's managedFields")
+	}
+}
+
+func TestPublishPodMetricsDocument(t *testing.T) {
+	var paths []string
+	srv := newTestESServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		var doc PodMetrics
+		if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+			t.Error(err)
+		}
+		if doc.Type != "POD_METRICS" || doc.Cluster != "cluster" || doc.ApplicationID != "app-e" || doc.Metrics.PodName != "app-e-driver" {
+			t.Errorf("incorrect metrics document: %+v", doc)
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	c, err := NewClient(config.ElasticsearchConfig{Address: srv.URL, Index: "events"}, "cluster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := podmetrics.PodMetricsDocument{ApplicationID: "app-e", Namespace: "default", PodName: "app-e-driver"}
+	if err := c.PublishPodMetrics(context.Background(), doc); err != nil {
+		t.Fatal(err)
+	}
+	doc.Metrics = map[string][]prometheus.Result{"cpu": {{Metric: map[string]string{"container": "main"}}}}
+	if err := c.PublishPodMetrics(context.Background(), doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 2 || paths[0] != paths[1] {
+		t.Fatalf("document id must be stable per application: %v", paths)
 	}
 }
 

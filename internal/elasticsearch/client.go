@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"podwatcher/internal/config"
+	"podwatcher/internal/podmetrics"
 	"podwatcher/internal/store"
 
 	es "github.com/elastic/go-elasticsearch/v8"
@@ -161,6 +162,40 @@ func (c *Client) PublishApplication(ctx context.Context, app store.ApplicationVi
 		app.Status = "failed"
 	}
 	body, err := json.Marshal(Completion{ApplicationID: app.ApplicationID, PodName: app.DriverPodName, Queue: app.DriverLabels["queue"], Type: "APPLICATION_COMPLETED", Cluster: c.cluster, Timestamp: now, IndexedAt: now, FinishedAt: *app.FinishedAt, Application: app})
+	if err != nil {
+		return err
+	}
+	return c.write(ctx, hex.EncodeToString(hash[:]), body)
+}
+
+// PodMetrics is distinct from Pod events and Completion: it carries the
+// aggregated Prometheus metrics of one driver pod's lifecycle under metrics.
+type PodMetrics struct {
+	ApplicationID string                        `json:"applicationId"`
+	PodName       string                        `json:"podName"`
+	Type          string                        `json:"type"`
+	Cluster       string                        `json:"cluster"`
+	Timestamp     time.Time                     `json:"@timestamp"`
+	IndexedAt     time.Time                     `json:"indexedAt"`
+	Metrics       podmetrics.PodMetricsDocument `json:"metrics"`
+}
+
+// PublishPodMetrics indexes one Spark pod's aggregated lifecycle metrics.
+// The document id is stable per application so retries and re-delivered
+// delete events overwrite instead of duplicating.
+func (c *Client) PublishPodMetrics(ctx context.Context, doc podmetrics.PodMetricsDocument) error {
+	identity, _ := json.Marshal([]string{c.cluster, doc.Namespace, doc.ApplicationID, "POD_METRICS"})
+	hash := sha256.Sum256(identity)
+	now := time.Now().UTC()
+	body, err := json.Marshal(PodMetrics{
+		ApplicationID: doc.ApplicationID,
+		PodName:       doc.PodName,
+		Type:          "POD_METRICS",
+		Cluster:       c.cluster,
+		Timestamp:     now,
+		IndexedAt:     now,
+		Metrics:       doc,
+	})
 	if err != nil {
 		return err
 	}

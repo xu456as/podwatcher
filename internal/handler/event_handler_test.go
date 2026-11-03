@@ -127,6 +127,32 @@ func TestDebugPayloadConfiguration(t *testing.T) {
 	}
 }
 
+type metricsPublisher struct {
+	testPublisher
+	pods []*corev1.Pod
+}
+
+func (p *metricsPublisher) PublishPodMetrics(_ context.Context, pod *corev1.Pod) error {
+	p.pods = append(p.pods, pod)
+	return nil
+}
+
+func TestPodMetricsExportTriggeredOnDelete(t *testing.T) {
+	s := store.NewStore("", 0, 0)
+	defer s.Stop()
+	p := &metricsPublisher{}
+	h := NewPodEventHandler(s, WithPublisher(p))
+	h.OnAdd(testutil.DriverPod("app-m-driver", "app-m", corev1.PodRunning, time.Now()), false)
+	h.OnDelete(testutil.ExecutorPod("app-m-exec-1", "app-m"))
+	if len(p.pods) != 1 || p.pods[0].Name != "app-m-exec-1" {
+		t.Fatalf("executor deletion must trigger metrics export, got %+v", p.pods)
+	}
+	h.OnDelete(testutil.DriverPod("app-m-driver", "app-m", corev1.PodRunning, time.Now()))
+	if len(p.pods) != 2 || p.pods[1].Name != "app-m-driver" {
+		t.Fatalf("driver deletion must trigger metrics export, got %+v", p.pods)
+	}
+}
+
 func newTestHandler() *PodEventHandler {
 	return NewPodEventHandler(store.NewStore("", 0, 0))
 }

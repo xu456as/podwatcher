@@ -55,6 +55,32 @@ type PrometheusConfig struct {
 	Token              string `yaml:"token"`
 }
 
+// PodMetricsQuery is one metric export: a PromQL range-query template plus an
+// optional post-processing flag.
+type PodMetricsQuery struct {
+	// Expr is a PromQL template; {namespace} and {pod} are substituted per
+	// deleted pod.
+	Expr string `yaml:"expr"`
+	// Accumulate replaces the per-step values with their running time
+	// integral (value x stepSeconds, summed in query order), turning a gauge
+	// such as working-set MB into a cumulative MB-seconds curve. Prometheus
+	// has no cumulative operator, so gauge-to-counter derivation happens in
+	// the exporter.
+	Accumulate bool `yaml:"accumulate"`
+}
+
+// PodMetricsExportConfig tunes the asynchronous exporter writing deleted
+// Spark pods' Prometheus metrics to Elasticsearch. Invalid values fall back
+// to the exporter's defaults.
+type PodMetricsExportConfig struct {
+	QueueSize   int `yaml:"queueSize"` // pending pod exports buffered before new ones are dropped
+	WorkerCount int `yaml:"workers"`   // concurrent export workers
+	StepSeconds int `yaml:"stepSeconds"`
+	// Queries maps an export name to its query. Entries merge with the
+	// built-in defaults, so one added entry exports one more metric.
+	Queries map[string]PodMetricsQuery `yaml:"queries"`
+}
+
 // TracingConfig configures OpenTelemetry trace export over OTLP/HTTP.
 // An empty endpoint disables tracing.
 type TracingConfig struct {
@@ -63,12 +89,13 @@ type TracingConfig struct {
 
 // Config is the application configuration.
 type Config struct {
-	Log           LogConfig           `yaml:"log"`
-	Pods          PodsConfig          `yaml:"pods"`
-	Cluster       ClusterConfig       `yaml:"cluster"`
-	Elasticsearch ElasticsearchConfig `yaml:"elasticsearch"`
-	Prometheus    PrometheusConfig    `yaml:"prometheus"`
-	Tracing       TracingConfig       `yaml:"tracing"`
+	Log              LogConfig              `yaml:"log"`
+	Pods             PodsConfig             `yaml:"pods"`
+	Cluster          ClusterConfig          `yaml:"cluster"`
+	Elasticsearch    ElasticsearchConfig    `yaml:"elasticsearch"`
+	Prometheus       PrometheusConfig       `yaml:"prometheus"`
+	PodMetricsExport PodMetricsExportConfig `yaml:"podMetricsExport"`
+	Tracing          TracingConfig          `yaml:"tracing"`
 }
 
 // DefaultConfig returns the default configuration.
@@ -92,6 +119,38 @@ func DefaultConfig() *Config {
 		},
 		Elasticsearch: ElasticsearchConfig{PasswordEnv: "ES_PASSWORD", Index: "podwatcher-events", TimeoutSeconds: 20},
 		Prometheus:    PrometheusConfig{TimeoutSeconds: 20},
+		PodMetricsExport: PodMetricsExportConfig{
+			QueueSize:   256,
+			WorkerCount: 2,
+			StepSeconds: 60,
+			Queries: map[string]PodMetricsQuery{
+				// The Spark main container is always named "main", so exact
+				// container matching yields one series per query — no summing,
+				// no cAdvisor pseudo-series (POD/empty) to exclude. Pods whose
+				// main container has another name produce no data and can be
+				// covered by overriding these templates.
+				// CPU cores in use by the main container (counter rate).
+				"cpuUsage": PodMetricsQuery{Expr: `rate(container_cpu_usage_seconds_total{namespace="{namespace}",pod="{pod}",container="main"}[5m])`},
+				// Cumulative CPU core-seconds; the single series' last point is
+				// the pod's lifetime vcoreSeconds total (resets on container
+				// restart — sum positive deltas to be exact).
+				"cpuVcoreSeconds": PodMetricsQuery{Expr: `container_cpu_usage_seconds_total{namespace="{namespace}",pod="{pod}",container="main"}`},
+				// Working set: the memory the kernel counts for reclaim/OOM.
+				"memoryWorkingSet": PodMetricsQuery{Expr: `container_memory_working_set_bytes{namespace="{namespace}",pod="{pod}",container="main"}`},
+				// Cumulative memory MB-seconds, the counterpart of
+				// cpuVcoreSeconds: each step's working-set MB is integrated
+				// (x stepSeconds, running sum) by the exporter.
+				"memoryMbSeconds": PodMetricsQuery{
+					Expr:       `container_memory_working_set_bytes{namespace="{namespace}",pod="{pod}",container="main"} / 1024 / 1024`,
+					Accumulate: true,
+				},
+				// Writable-layer filesystem usage.
+				"fsUsage": PodMetricsQuery{Expr: `container_fs_usage_bytes{namespace="{namespace}",pod="{pod}",container="main"}`},
+				// kube-state-metrics gauges, one series per resource.
+				"resourceRequests": PodMetricsQuery{Expr: `kube_pod_container_resource_requests{namespace="{namespace}",pod="{pod}",container="main"}`},
+				"resourceLimits":   PodMetricsQuery{Expr: `kube_pod_container_resource_limits{namespace="{namespace}",pod="{pod}",container="main"}`},
+			},
+		},
 		Tracing: TracingConfig{
 			Endpoint: "http://opentelemetry-collector-collector.otel.svc.cluster.local:4318",
 		},

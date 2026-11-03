@@ -4,7 +4,7 @@ cluster:
 elasticsearch:
   timeoutSeconds: 20
   insecureSkipVerify: false
-  address: ""
+  address: "http://localhost:9200"
   username: ""
   passwordEnv: "ES_PASSWORD"
   index: "podwatcher-events"
@@ -26,3 +26,38 @@ pods:
     # back to resumeFile. Override per environment in overlays.
   checkpointUrl: ""
   checkpointFlushSeconds: 10
+# Async export of a deleted Spark pod's lifecycle metrics to Elasticsearch.
+# Requires elasticsearch.address to be non-empty; prometheus.address above
+# feeds the queries. Queue depth is reported to the OTel collector as
+# podwatcher.podmetrics.queue.depth.
+podMetricsExport:
+  # Pending pod exports buffered before new ones are dropped
+  queueSize: 256
+  # Concurrent export workers
+  workers: 2
+  # Sampling step of the lifecycle range queries
+  stepSeconds: 60
+  # All templates pin container="main" (the Spark main container's name);
+  # each query returns a single series. {namespace} and {pod} are substituted
+  # per deleted pod; accumulate turns a gauge into a cumulative curve.
+  queries:
+    # CPU cores in use (counter rate, 5m smoothing window)
+    cpuUsage:
+      expr: 'rate(container_cpu_usage_seconds_total{namespace="{namespace}",pod="{pod}",container="main"}[5m])'
+    # Cumulative CPU core-seconds; the last point is the lifetime total
+    cpuVcoreSeconds:
+      expr: 'container_cpu_usage_seconds_total{namespace="{namespace}",pod="{pod}",container="main"}'
+    # Instantaneous working set, the memory the kernel counts for reclaim/OOM
+    memoryWorkingSet:
+      expr: 'container_memory_working_set_bytes{namespace="{namespace}",pod="{pod}",container="main"}'
+    # Cumulative MB-seconds, the counterpart of cpuVcoreSeconds
+    memoryMbSeconds:
+      expr: 'container_memory_working_set_bytes{namespace="{namespace}",pod="{pod}",container="main"} / 1024 / 1024'
+      accumulate: true
+    # Writable-layer filesystem usage
+    fsUsage:
+      expr: 'container_fs_usage_bytes{namespace="{namespace}",pod="{pod}",container="main"}'
+    resourceRequests:
+      expr: 'kube_pod_container_resource_requests{namespace="{namespace}",pod="{pod}",container="main"}'
+    resourceLimits:
+      expr: 'kube_pod_container_resource_limits{namespace="{namespace}",pod="{pod}",container="main"}'

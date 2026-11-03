@@ -162,6 +162,11 @@ func (h *PodEventHandler) OnDelete(obj interface{}) {
 	h.publish("DELETED", pod, false)
 	h.publishApplication(pod)
 
+	// The pod's lifecycle is over: hand it to the optional async metrics
+	// exporter for its final resource-usage record. Both drivers and
+	// executors are exported.
+	h.publishPodMetrics(pod)
+
 	if role != "driver" {
 		return
 	}
@@ -200,6 +205,14 @@ type ApplicationPublisher interface {
 	PublishApplication(context.Context, store.ApplicationView) error
 }
 
+// PodMetricsPublisher optionally exports a deleted Spark pod's Prometheus
+// metrics. Like ApplicationPublisher it is probed at runtime; implementations
+// must accept quickly and run the slow Prometheus/Elasticsearch work
+// asynchronously so informer callbacks are never blocked.
+type PodMetricsPublisher interface {
+	PublishPodMetrics(context.Context, *corev1.Pod) error
+}
+
 func (h *PodEventHandler) publishApplication(pod *corev1.Pod) {
 	if store.SparkRole(pod) != "driver" {
 		return
@@ -220,6 +233,22 @@ func (h *PodEventHandler) publishApplication(pod *corev1.Pod) {
 		h.logPublishPayload(err)
 	} else if h.isDebug {
 		klog.Infof("[DEBUG] Elasticsearch published completed application %s", app.ApplicationID)
+	}
+}
+
+// publishPodMetrics hands a deleted Spark pod to the optional metrics
+// exporter. Failures here must not affect the state stores or the
+// diagnostic stream; the exporter owns retries and slow I/O.
+func (h *PodEventHandler) publishPodMetrics(pod *corev1.Pod) {
+	publisher, ok := h.publisher.(PodMetricsPublisher)
+	if !ok {
+		return
+	}
+	if h.isDebug {
+		klog.Infof("[DEBUG] enqueueing pod metrics export %s/%s", pod.Namespace, pod.Name)
+	}
+	if err := publisher.PublishPodMetrics(context.Background(), pod); err != nil {
+		klog.Errorf("Failed to enqueue pod metrics export %s/%s: %v", pod.Namespace, pod.Name, err)
 	}
 }
 
