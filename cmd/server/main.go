@@ -149,6 +149,7 @@ func main() {
 			podmetrics.WithQueries(queries),
 		)
 		handlerOptions = append(handlerOptions, handler.WithPublisher(&compositePublisher{events: esPublisher, podMetrics: podMetricsExporter}))
+		podMetricsExporter.Start()
 		klog.Infof("Pod metrics export enabled: prometheus=%s stepSeconds=%d queries=%d queueSize=%d workers=%d",
 			cfg.Prometheus.Address, cfg.PodMetricsExport.StepSeconds, len(cfg.PodMetricsExport.Queries), cfg.PodMetricsExport.QueueSize, cfg.PodMetricsExport.WorkerCount)
 	}
