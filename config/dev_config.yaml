@@ -31,6 +31,8 @@ pods:
 # feeds the queries. Queue depth is reported to the OTel collector as
 # podwatcher.podmetrics.queue.depth.
 podMetricsExport:
+  # Opt-in gate; must be true to wire up the exporter.
+  enabled: true
   # Pending pod exports buffered before new ones are dropped
   queueSize: 256
   # Concurrent export workers

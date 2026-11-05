@@ -38,6 +38,9 @@ func TestPodMetricsExportDefaults(t *testing.T) {
 	if e.QueueSize != 256 || e.WorkerCount != 2 || e.StepSeconds != 60 {
 		t.Fatalf("unexpected exporter defaults: %+v", e)
 	}
+	if e.Enabled {
+		t.Fatal("podMetricsExport.enabled must default to false (opt-in)")
+	}
 	// The confirmed default selection must include all metrics with a
 	// pod/namespace selector template.
 	for _, name := range []string{

@@ -15,11 +15,13 @@ import (
 )
 
 type fakeQuerier struct {
-	entered chan struct{} // closed when the first query starts
-	release chan struct{} // blocks queries until closed
-	queries []string
-	results []prometheus.Result
-	err     error
+	entered        chan struct{} // closed when the first query starts
+	release        chan struct{} // blocks queries until closed
+	queries        []string
+	results        []prometheus.Result            // default results for all queries
+	resultsByQuery map[string][]prometheus.Result // per-query override
+	err            error                          // default error for all queries
+	errByQuery     map[string]error               // per-query error override
 }
 
 func (q *fakeQuerier) QueryRange(_ context.Context, query string, _, _ time.Time, _ time.Duration) ([]prometheus.Result, error) {
@@ -31,6 +33,18 @@ func (q *fakeQuerier) QueryRange(_ context.Context, query string, _, _ time.Time
 		<-q.release
 	}
 	q.queries = append(q.queries, query)
+	// Per-query overrides take precedence — lets callers shape individual
+	// responses for multi-metric tests.
+	if q.errByQuery != nil {
+		if err, ok := q.errByQuery[query]; ok {
+			return nil, err
+		}
+	}
+	if q.resultsByQuery != nil {
+		if results, ok := q.resultsByQuery[query]; ok {
+			return results, nil
+		}
+	}
 	return q.results, q.err
 }
 
@@ -235,19 +249,54 @@ func TestAccumulateBuildsRunningIntegral(t *testing.T) {
 	}
 }
 
-func TestAccumulateRejectsNonNumericSamples(t *testing.T) {
-	querier := &fakeQuerier{results: []prometheus.Result{{
-		Metric: map[string]string{"container": "main"},
-		Values: []prometheus.Sample{{Timestamp: 1, Value: "NaN"}},
-	}}}
+// TestAccumulateIsolatedPerMetric verifies that accumulate's non-finite
+// rejection (compute-layer failure) is isolated per metric — the bad metric
+// ends up as an empty slice in doc.Metrics, but sibling metrics still index
+// normally and the document is written to the sink. IO-layer failures
+// (QueryRange, sink write) continue to abort the whole export — see
+// TestExporterDropsExportOnQueryFailure.
+func TestAccumulateIsolatedPerMetric(t *testing.T) {
+	querier := &fakeQuerier{
+		resultsByQuery: map[string][]prometheus.Result{
+			// Keys are the Expr strings — the querier receives Expr, not the
+			// configured export name.
+			"cpu-q": {{
+				Metric: map[string]string{"__name__": "container_cpu_usage_seconds_total"},
+				Values: []prometheus.Sample{{Timestamp: 1, Value: "0.5"}},
+			}},
+			// memoryMbSeconds returns NaN — accumulate will reject it but
+			// the isolation policy keeps the export going.
+			"mem-q": {{
+				Metric: map[string]string{"__name__": "container_memory_working_set_bytes"},
+				Values: []prometheus.Sample{{Timestamp: 1, Value: "NaN"}},
+			}},
+		},
+	}
 	sink := &fakeSink{docs: make(chan PodMetricsDocument, 1)}
 	e := NewExporter(querier, sink)
-	e.buildQueries = withQueries(map[string]QuerySpec{"memoryMbSeconds": {Expr: "q", Accumulate: true}})
-	e.process(deletedDriver("uid-10"))
+	e.buildQueries = withQueries(map[string]QuerySpec{
+		"cpu":             {Expr: "cpu-q"},
+		"memoryMbSeconds": {Expr: "mem-q", Accumulate: true},
+	})
+	e.process(deletedDriver("uid-11"))
+
+	var doc PodMetricsDocument
 	select {
-	case doc := <-sink.docs:
-		t.Fatalf("failed accumulation must not index a document: %+v", doc)
-	default:
+	case doc = <-sink.docs:
+	case <-time.After(2 * time.Second):
+		t.Fatal("export did not complete — compute error must not abort IO")
+	}
+	// Good metric was indexed normally.
+	if len(doc.Metrics["cpu"]) != 1 {
+		t.Fatalf("cpu metric should be present, got %v", doc.Metrics["cpu"])
+	}
+	// Bad metric is isolated to an empty slice, not absent.
+	mem, ok := doc.Metrics["memoryMbSeconds"]
+	if !ok {
+		t.Fatal("memoryMbSeconds key must exist even after accumulate failure")
+	}
+	if len(mem) != 0 {
+		t.Fatalf("accumulate-failed metric must be empty slice, got %v", mem)
 	}
 }
 

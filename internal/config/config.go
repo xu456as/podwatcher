@@ -73,9 +73,13 @@ type PodMetricsQuery struct {
 // Spark pods' Prometheus metrics to Elasticsearch. Invalid values fall back
 // to the exporter's defaults.
 type PodMetricsExportConfig struct {
-	QueueSize   int `yaml:"queueSize"` // pending pod exports buffered before new ones are dropped
-	WorkerCount int `yaml:"workers"`   // concurrent export workers
-	StepSeconds int `yaml:"stepSeconds"`
+	// Enabled gates the exporter. Defaults to false so the feature is opt-in.
+	// Requires elasticsearch.address and prometheus.address to also be set
+	// in order to actually run; main.go checks all three before wiring up.
+	Enabled     bool `yaml:"enabled"`
+	QueueSize   int  `yaml:"queueSize"` // pending pod exports buffered before new ones are dropped
+	WorkerCount int  `yaml:"workers"`   // concurrent export workers
+	StepSeconds int  `yaml:"stepSeconds"`
 	// Queries maps an export name to its query. Entries merge with the
 	// built-in defaults, so one added entry exports one more metric.
 	Queries map[string]PodMetricsQuery `yaml:"queries"`

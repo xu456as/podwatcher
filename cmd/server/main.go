@@ -127,16 +127,21 @@ func main() {
 		klog.Warning("Elasticsearch publishing disabled: elasticsearch.address is empty; check the loaded config file")
 	}
 
-	// Deleting a Spark pod triggers an async export of its Prometheus
-	// metrics back to Elasticsearch; it needs both endpoints configured,
-	// otherwise the handler runs without the metrics capability.
+	// The handler's publisher is either the raw ES client (ADDED/DELETED
+	// only) or a composite that also triggers the async metrics exporter.
+	// Start with just events; upgrade to composite below if enabled.
+	var handlerPublisher handler.EventPublisher = esPublisher
+
+	// Pod metrics export is opt-in: cfg.PodMetricsExport.Enabled must be true,
+	// and both elasticsearch.address and prometheus.address must be set.
 	var podMetricsExporter *podmetrics.Exporter
 	switch {
+	case !cfg.PodMetricsExport.Enabled:
+		klog.Info("Pod metrics export disabled: podMetricsExport.enabled is false (opt-in)")
 	case esPublisher == nil:
 		klog.Warning("Pod metrics export disabled: elasticsearch.address is empty")
 	case cfg.Prometheus.Address == "":
 		klog.Warning("Pod metrics export disabled: prometheus.address is empty")
-		handlerOptions = append(handlerOptions, handler.WithPublisher(esPublisher))
 	default:
 		queries := make(map[string]podmetrics.QuerySpec, len(cfg.PodMetricsExport.Queries))
 		for name, q := range cfg.PodMetricsExport.Queries {
@@ -148,11 +153,12 @@ func main() {
 			podmetrics.WithStep(time.Duration(cfg.PodMetricsExport.StepSeconds)*time.Second),
 			podmetrics.WithQueries(queries),
 		)
-		handlerOptions = append(handlerOptions, handler.WithPublisher(&compositePublisher{events: esPublisher, podMetrics: podMetricsExporter}))
+		handlerPublisher = &compositePublisher{events: esPublisher, podMetrics: podMetricsExporter}
 		podMetricsExporter.Start()
 		klog.Infof("Pod metrics export enabled: prometheus=%s stepSeconds=%d queries=%d queueSize=%d workers=%d",
 			cfg.Prometheus.Address, cfg.PodMetricsExport.StepSeconds, len(cfg.PodMetricsExport.Queries), cfg.PodMetricsExport.QueueSize, cfg.PodMetricsExport.WorkerCount)
 	}
+	handlerOptions = append(handlerOptions, handler.WithPublisher(handlerPublisher))
 	eventHandler := handler.NewPodEventHandler(stateStore, handlerOptions...)
 
 	resumeStore := buildResumeStore(cfg.Pods)

@@ -135,6 +135,9 @@ type Exporter struct {
 	// can inject queries; the production value renders the configured specs
 	// (see renderQueries).
 	buildQueries func(*corev1.Pod) map[string]QuerySpec
+	// durationHistogram records each export's wall-clock latency; nil when
+	// the global meter provider is not configured (OTel no-op).
+	durationHistogram metric.Float64Histogram
 }
 
 // NewExporter builds an exporter; call Start to launch the workers.
@@ -156,6 +159,7 @@ func NewExporter(querier Querier, sink Sink, opts ...Option) *Exporter {
 		e.buildQueries = renderQueries(e.queries)
 	}
 	e.observeQueueDepth()
+	e.initHistogram()
 	return e
 }
 
@@ -196,6 +200,27 @@ func (e *Exporter) observeQueueDepth() {
 	}, gauge); err != nil {
 		klog.Warningf("Failed to register pod metrics queue depth callback: %v", err)
 	}
+}
+
+// initHistogram creates a histogram recording the end-to-end export latency
+// for each pod: range queries + optional accumulation + Elasticsearch write.
+// The OTel SDK's default bucket boundaries (under 10s) are a reasonable fit
+// for Prometheus range queries; Prometheus OTLP exporters automatically
+// compute p50/p90/p99 from histogram buckets. Returns nil in no-op mode, so
+// callers can safely e.durationHistogram.Record(ctx, d) — the SDK treats nil
+// receivers as no-ops.
+func (e *Exporter) initHistogram() {
+	meter := otel.Meter("podwatcher")
+	h, err := meter.Float64Histogram(
+		"podwatcher.podmetrics.export.duration",
+		metric.WithDescription("Wall-clock time for one pod's metrics export (range queries + accumulation + ES write)"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		klog.Warningf("Failed to create pod metrics export duration histogram: %v", err)
+		return
+	}
+	e.durationHistogram = h
 }
 
 // PublishPodMetrics accepts a deleted pod for export. It only snapshots the
@@ -247,9 +272,29 @@ func (e *Exporter) work() {
 // process runs one export: lifecycle window, range queries, index the
 // aggregated document. Failures are logged and dropped — Prometheus retains
 // the raw samples, so a later reconciliation pass can retry.
+//
+// Error-handling policy split by layer:
+//   - IO-layer errors (Prometheus QueryRange, Elasticsearch write) fail the
+//     whole pod's export — every configured metric gets a gap if one RPC
+//     fails, since we can't know how partial success interacts with a later
+//     retry (the sink is idempotent, but we'd rather not leave a half-full
+//     document competing with a future retry). These never panic; they just
+//     log and return.
+//   - Compute-layer errors (accumulate's non-finite-sample rejection) are
+//     per-metric isolated: the bad metric gets an empty slice in doc.Metrics
+//     and processing continues for the others. A gap like this is usually
+//     transient (Prometheus TSDB backfilling a single NaN) and not worth
+//     dropping seven other metrics for.
 func (e *Exporter) process(pod *corev1.Pod) {
+	exportStart := time.Now()
 	ctx, cancel := context.WithTimeout(e.ctx, processTimeout)
 	defer cancel()
+	defer func() {
+		if e.durationHistogram != nil {
+			e.durationHistogram.Record(ctx, time.Since(exportStart).Seconds())
+		}
+	}()
+
 	start, end := lifecycleWindow(pod)
 	if start.IsZero() || !start.Before(end) {
 		klog.Warningf("Pod metrics export skipped for %s: empty lifecycle window (start=%v end=%v)",
@@ -258,8 +303,6 @@ func (e *Exporter) process(pod *corev1.Pod) {
 	}
 	queries := e.buildQueries(pod)
 	if len(queries) == 0 {
-		// Reached only until the PromQL selection is implemented; keeps the
-		// wiring observable without writing placeholder documents.
 		klog.Infof("Pod metrics export has no queries configured, skipping %s/%s", pod.Namespace, pod.Name)
 		return
 	}
@@ -276,20 +319,32 @@ func (e *Exporter) process(pod *corev1.Pod) {
 	for name, spec := range queries {
 		results, err := e.querier.QueryRange(ctx, spec.Expr, start, end, e.step)
 		if err != nil {
+			// IO-layer failure: abort this pod's export. Prometheus error is
+			// persistent (server unreachable / auth / expression invalid), so
+			// retrying other queries on the same pod won't help.
 			klog.Errorf("Pod metrics query %q failed for %s/%s: %v", name, pod.Namespace, pod.Name, err)
 			return
 		}
 		if spec.Accumulate {
 			results, err = accumulate(results, e.step)
 			if err != nil {
-				klog.Errorf("Pod metrics query %q cannot be accumulated for %s/%s: %v", name, pod.Namespace, pod.Name, err)
-				return
+				// Compute-layer failure: isolate. A non-finite sample inside
+				// one series doesn't invalidate the others (or the other
+				// metrics). Log loud so operators know a metric is degraded.
+				klog.Warningf("Pod metrics query %q accumulate failed for %s/%s, exporting empty: %v",
+					name, pod.Namespace, pod.Name, err)
+				doc.Metrics[name] = []prometheus.Result{}
+				continue
 			}
 		}
 		doc.Metrics[name] = results
 	}
 	if err := e.sink.PublishPodMetrics(ctx, doc); err != nil {
+		// IO-layer failure: abort. The sink already has stable idempotency,
+		// so a future retry of this pod will overwrite cleanly — but we must
+		// not leave a half-written document behind.
 		klog.Errorf("Failed to publish pod metrics for %s/%s: %v", pod.Namespace, pod.Name, err)
+		return
 	}
 }
 
