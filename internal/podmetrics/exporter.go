@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -99,17 +100,26 @@ type Sink interface {
 }
 
 // PodMetricsDocument carries a Spark pod's identity plus the metrics
-// collected over its lifecycle. The Metrics keys are the configured export
-// names (podMetricsExport.queries), each holding that query's full series.
+// collected over its lifecycle.
 type PodMetricsDocument struct {
-	ApplicationID string                         `json:"applicationId"`
-	Namespace     string                         `json:"namespace"`
-	PodName       string                         `json:"podName"`
-	Role          string                         `json:"role"` // driver or executor
-	Node          string                         `json:"node"`
-	WindowStart   time.Time                      `json:"windowStart"`
-	WindowEnd     time.Time                      `json:"windowEnd"`
-	Metrics       map[string][]prometheus.Result `json:"metrics,omitempty"`
+	ApplicationID string         `json:"applicationId"`
+	Namespace     string         `json:"namespace"`
+	PodName       string         `json:"podName"`
+	Role          string         `json:"role"` // driver or executor
+	Node          string         `json:"node"`
+	WindowStart   time.Time      `json:"windowStart"`
+	WindowEnd     time.Time      `json:"windowEnd"`
+	Metrics       []MetricSeries `json:"metrics,omitempty"`
+}
+
+// MetricSeries is one Prometheus series belonging to one configured export
+// (podMetricsExport.queries). The export name is a field value rather than a
+// JSON object key so the Elasticsearch mapping stays fixed no matter how many
+// queries are configured: an extra query grows the document, not the mapping.
+type MetricSeries struct {
+	Name   string              `json:"name"`
+	Metric map[string]string   `json:"metric,omitempty"`
+	Values []prometheus.Sample `json:"values"`
 }
 
 // Exporter accepts deleted Spark pods and exports their lifecycle metrics.
@@ -125,8 +135,9 @@ type Exporter struct {
 	queries map[string]QuerySpec
 	step    time.Duration
 	// inflight deduplicates re-delivered OnDelete events while a pod is
-	// queued or being processed. After completion, redeliveries rely on the
-	// sink's stable document id for idempotency.
+	// queued or being processed. After completion, a redelivery exports the
+	// pod again and the sink inserts a second document; the two records are
+	// identical apart from indexedAt, so consumers must deduplicate by pod.
 	inflight sync.Map
 	wg       sync.WaitGroup
 	ctx      context.Context
@@ -277,14 +288,14 @@ func (e *Exporter) work() {
 //   - IO-layer errors (Prometheus QueryRange, Elasticsearch write) fail the
 //     whole pod's export — every configured metric gets a gap if one RPC
 //     fails, since we can't know how partial success interacts with a later
-//     retry (the sink is idempotent, but we'd rather not leave a half-full
-//     document competing with a future retry). These never panic; they just
+//     retry (the sink inserts a new document per call, so a half-full one
+//     would sit next to the complete retry). These never panic; they just
 //     log and return.
 //   - Compute-layer errors (accumulate's non-finite-sample rejection) are
-//     per-metric isolated: the bad metric gets an empty slice in doc.Metrics
-//     and processing continues for the others. A gap like this is usually
-//     transient (Prometheus TSDB backfilling a single NaN) and not worth
-//     dropping seven other metrics for.
+//     per-metric isolated: the bad metric keeps a series entry with no values
+//     in doc.Metrics and processing continues for the others. A gap like this
+//     is usually transient (Prometheus TSDB backfilling a single NaN) and not
+//     worth dropping seven other metrics for.
 func (e *Exporter) process(pod *corev1.Pod) {
 	exportStart := time.Now()
 	ctx, cancel := context.WithTimeout(e.ctx, processTimeout)
@@ -314,9 +325,17 @@ func (e *Exporter) process(pod *corev1.Pod) {
 		Node:          pod.Spec.NodeName,
 		WindowStart:   start,
 		WindowEnd:     end,
-		Metrics:       make(map[string][]prometheus.Result, len(queries)),
+		Metrics:       make([]MetricSeries, 0, len(queries)),
 	}
-	for name, spec := range queries {
+	// Sort the export names so the document body is reproducible; map
+	// iteration order would otherwise reshuffle the array on every export.
+	names := make([]string, 0, len(queries))
+	for name := range queries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		spec := queries[name]
 		results, err := e.querier.QueryRange(ctx, spec.Expr, start, end, e.step)
 		if err != nil {
 			// IO-layer failure: abort this pod's export. Prometheus error is
@@ -333,16 +352,18 @@ func (e *Exporter) process(pod *corev1.Pod) {
 				// metrics). Log loud so operators know a metric is degraded.
 				klog.Warningf("Pod metrics query %q accumulate failed for %s/%s, exporting empty: %v",
 					name, pod.Namespace, pod.Name, err)
-				doc.Metrics[name] = []prometheus.Result{}
+				doc.Metrics = append(doc.Metrics, MetricSeries{Name: name, Values: []prometheus.Sample{}})
 				continue
 			}
 		}
-		doc.Metrics[name] = results
+		for _, result := range results {
+			doc.Metrics = append(doc.Metrics, MetricSeries{Name: name, Metric: result.Metric, Values: result.Values})
+		}
 	}
 	if err := e.sink.PublishPodMetrics(ctx, doc); err != nil {
-		// IO-layer failure: abort. The sink already has stable idempotency,
-		// so a future retry of this pod will overwrite cleanly — but we must
-		// not leave a half-written document behind.
+		// IO-layer failure: abort. The write is a single request that either
+		// lands whole or not at all, and every publish inserts a new document,
+		// so a later retry adds a complete record instead of patching this one.
 		klog.Errorf("Failed to publish pod metrics for %s/%s: %v", pod.Namespace, pod.Name, err)
 		return
 	}

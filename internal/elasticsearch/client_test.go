@@ -15,7 +15,6 @@ import (
 
 	"podwatcher/internal/config"
 	"podwatcher/internal/podmetrics"
-	"podwatcher/internal/prometheus"
 	"podwatcher/internal/store"
 	"podwatcher/internal/testutil"
 
@@ -222,8 +221,8 @@ func TestPublishCompletedApplication(t *testing.T) {
 	if err := c.PublishApplication(context.Background(), app); err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) != 2 || paths[0] != paths[1] {
-		t.Fatalf("one summary per application: %v", paths)
+	if len(paths) != 2 || paths[0] == paths[1] {
+		t.Fatalf("every completion publish must insert a new document: %v", paths)
 	}
 	app.FinishedAt = nil
 	if err := c.PublishApplication(context.Background(), app); err == nil {
@@ -449,8 +448,10 @@ func TestLifecycleDocumentIDsAndNoPodSpec(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if paths[0] != paths[1] || paths[0] == paths[2] || paths[0] == paths[3] || paths[2] == paths[3] {
-		t.Fatalf("incorrect document IDs: %v", paths)
+	// Every publish generates a fresh id, so an identical replay is stored as
+	// another document instead of replacing the earlier one.
+	if paths[0] == paths[1] || paths[0] == paths[2] || paths[0] == paths[3] || paths[1] == paths[2] || paths[1] == paths[3] || paths[2] == paths[3] {
+		t.Fatalf("every publish must insert a new document: %v", paths)
 	}
 	if len(pod.ManagedFields) != 1 {
 		t.Fatal("publishing must not modify the original Pod metadata")
@@ -524,12 +525,14 @@ func TestPublishPodMetricsDocument(t *testing.T) {
 	if err := c.PublishPodMetrics(context.Background(), doc); err != nil {
 		t.Fatal(err)
 	}
-	doc.Metrics = map[string][]prometheus.Result{"cpu": {{Metric: map[string]string{"container": "main"}}}}
+	doc.Metrics = []podmetrics.MetricSeries{{Name: "cpu", Metric: map[string]string{"container": "main"}}}
 	if err := c.PublishPodMetrics(context.Background(), doc); err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) != 2 || paths[0] != paths[1] {
-		t.Fatalf("document id must be stable per application: %v", paths)
+	// Each export is a new document, so two pods of the same application (or a
+	// re-delivered delete event) are never collapsed into one record.
+	if len(paths) != 2 || paths[0] == paths[1] {
+		t.Fatalf("every publish must insert a new document: %v", paths)
 	}
 }
 

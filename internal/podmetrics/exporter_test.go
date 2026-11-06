@@ -100,7 +100,7 @@ func TestExporterPublishesLifecycleMetrics(t *testing.T) {
 	if !doc.WindowStart.Equal(created) || !doc.WindowEnd.Equal(finished) {
 		t.Fatalf("window must end at container termination, got %v..%v", doc.WindowStart, doc.WindowEnd)
 	}
-	if len(doc.Metrics["cpu"]) != 1 || len(querier.queries) != 1 || querier.queries[0] != "sum(rate(container_cpu_usage[5m]))" {
+	if len(doc.Metrics) != 1 || doc.Metrics[0].Name != "cpu" || len(querier.queries) != 1 || querier.queries[0] != "sum(rate(container_cpu_usage[5m]))" {
 		t.Fatalf("incorrect metrics: %+v / %v", doc.Metrics, querier.queries)
 	}
 }
@@ -241,7 +241,7 @@ func TestAccumulateBuildsRunningIntegral(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("export did not complete")
 	}
-	got := doc.Metrics["memoryMbSeconds"][0].Values
+	got := seriesFor(doc, "memoryMbSeconds")[0].Values
 	for i, want := range []float64{600, 1800, 3600} {
 		if v, err := strconv.ParseFloat(got[i].Value, 64); err != nil || v != want {
 			t.Fatalf("point %d: got %v (%q) want %v", i, v, got[i].Value, want)
@@ -251,9 +251,9 @@ func TestAccumulateBuildsRunningIntegral(t *testing.T) {
 
 // TestAccumulateIsolatedPerMetric verifies that accumulate's non-finite
 // rejection (compute-layer failure) is isolated per metric — the bad metric
-// ends up as an empty slice in doc.Metrics, but sibling metrics still index
-// normally and the document is written to the sink. IO-layer failures
-// (QueryRange, sink write) continue to abort the whole export — see
+// keeps one series entry with no values in doc.Metrics, but sibling metrics
+// still index normally and the document is written to the sink. IO-layer
+// failures (QueryRange, sink write) continue to abort the whole export — see
 // TestExporterDropsExportOnQueryFailure.
 func TestAccumulateIsolatedPerMetric(t *testing.T) {
 	querier := &fakeQuerier{
@@ -287,17 +287,28 @@ func TestAccumulateIsolatedPerMetric(t *testing.T) {
 		t.Fatal("export did not complete — compute error must not abort IO")
 	}
 	// Good metric was indexed normally.
-	if len(doc.Metrics["cpu"]) != 1 {
-		t.Fatalf("cpu metric should be present, got %v", doc.Metrics["cpu"])
+	if cpu := seriesFor(doc, "cpu"); len(cpu) != 1 {
+		t.Fatalf("cpu metric should be present, got %v", doc.Metrics)
 	}
-	// Bad metric is isolated to an empty slice, not absent.
-	mem, ok := doc.Metrics["memoryMbSeconds"]
-	if !ok {
-		t.Fatal("memoryMbSeconds key must exist even after accumulate failure")
+	// Bad metric keeps one marker entry with no values instead of vanishing.
+	mem := seriesFor(doc, "memoryMbSeconds")
+	if len(mem) != 1 {
+		t.Fatalf("memoryMbSeconds must keep one empty series entry, got %v", doc.Metrics)
 	}
-	if len(mem) != 0 {
-		t.Fatalf("accumulate-failed metric must be empty slice, got %v", mem)
+	if len(mem[0].Values) != 0 {
+		t.Fatalf("accumulate-failed metric must have no values, got %v", mem[0].Values)
 	}
+}
+
+// seriesFor collects every MetricSeries recorded under one export name.
+func seriesFor(doc PodMetricsDocument, name string) []MetricSeries {
+	var out []MetricSeries
+	for _, series := range doc.Metrics {
+		if series.Name == name {
+			out = append(out, series)
+		}
+	}
+	return out
 }
 
 func TestLifecycleWindow(t *testing.T) {

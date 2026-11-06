@@ -139,17 +139,18 @@ func NewClient(cfg config.ElasticsearchConfig, cluster string, opts ...Option) (
 	return client, nil
 }
 
-// Publish uses a stable id so retries and watch replays overwrite the same event.
-// INITIAL adds have their own id and cannot replace a real ADDED event.
+// Publish always inserts a new document. Lifecycle events are immutable facts,
+// so a replayed or re-delivered event must add another record instead of
+// replacing the earlier one. The timestamp is part of the id, so two publishes
+// of the same event get two ids while the retry loop inside write still reuses
+// one id per call.
 func (c *Client) Publish(ctx context.Context, eventType string, pod *corev1.Pod, initial bool) error {
+	now := time.Now().UTC()
 	identity := string(pod.UID)
 	if identity == "" {
 		identity = pod.Namespace + "/" + pod.Name
 	}
-	idBytes, _ := json.Marshal([]interface{}{c.cluster, identity, pod.ResourceVersion, eventType, initial})
-	hash := sha256.Sum256(idBytes)
-	id := hex.EncodeToString(hash[:])
-	now := time.Now().UTC()
+	id := documentID(c.cluster, now, identity, pod.ResourceVersion, eventType, initial)
 	event := Event{ApplicationID: store.AppIDFromPod(pod), PodName: pod.Name, Queue: pod.Labels["queue"], Type: eventType, Cluster: c.cluster, Timestamp: now, Initial: initial, Metadata: pod.ObjectMeta, Node: pod.Spec.NodeName}
 	// Strip field ownership bookkeeping from the document's metadata copy.
 	event.Metadata.ManagedFields = nil
@@ -184,9 +185,8 @@ func (c *Client) PublishApplication(ctx context.Context, app store.ApplicationVi
 	if app.FinishedAt == nil {
 		return fmt.Errorf("application has no finishedAt")
 	}
-	identity, _ := json.Marshal([]string{c.cluster, app.Namespace, app.ApplicationID, "APPLICATION_COMPLETED"})
-	hash := sha256.Sum256(identity)
 	now := time.Now().UTC()
+	id := documentID(c.cluster, now, app.Namespace, app.ApplicationID, "APPLICATION_COMPLETED")
 	app.Cluster = c.cluster
 	// Deletion after success/failure must retain the actual completion outcome.
 	if app.DriverPhase == string(corev1.PodSucceeded) {
@@ -199,11 +199,11 @@ func (c *Client) PublishApplication(ctx context.Context, app store.ApplicationVi
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, c.index, hex.EncodeToString(hash[:]), body)
+	return c.write(ctx, c.index, id, body)
 }
 
 // PodMetrics is distinct from Pod events and Completion: it carries the
-// aggregated Prometheus metrics of one driver pod's lifecycle under metrics.
+// aggregated Prometheus metrics of one Spark pod's lifecycle under metrics.
 type PodMetrics struct {
 	ApplicationID string                        `json:"applicationId"`
 	PodName       string                        `json:"podName"`
@@ -215,12 +215,12 @@ type PodMetrics struct {
 }
 
 // PublishPodMetrics indexes one Spark pod's aggregated lifecycle metrics.
-// The document id is stable per application so retries and re-delivered
-// delete events overwrite instead of duplicating.
+// Every export inserts a new document: the metrics are an immutable snapshot,
+// and two pods of the same application must be stored side by side instead of
+// overwriting each other.
 func (c *Client) PublishPodMetrics(ctx context.Context, doc podmetrics.PodMetricsDocument) error {
-	identity, _ := json.Marshal([]string{c.cluster, doc.Namespace, doc.ApplicationID, "POD_METRICS"})
-	hash := sha256.Sum256(identity)
 	now := time.Now().UTC()
+	id := documentID(c.cluster, now, doc.Namespace, doc.ApplicationID, "POD_METRICS")
 	body, err := json.Marshal(PodMetrics{
 		ApplicationID: doc.ApplicationID,
 		PodName:       doc.PodName,
@@ -233,7 +233,7 @@ func (c *Client) PublishPodMetrics(ctx context.Context, doc podmetrics.PodMetric
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, c.metricsIndex, hex.EncodeToString(hash[:]), body)
+	return c.write(ctx, c.metricsIndex, id, body)
 }
 
 // PublishError carries the actual sanitized document for debug logging only.
@@ -246,6 +246,19 @@ type PublishError struct {
 func (e *PublishError) Error() string        { return e.Err.Error() }
 func (e *PublishError) Unwrap() error        { return e.Err }
 func (e *PublishError) DebugPayload() string { return e.payload }
+
+// documentID hashes the identity fields of one publish. The timestamp is part
+// of the identity so two publishes of the same object get two ids (documents
+// are immutable facts and writes must never update), while the retry loop in
+// write still reuses one id per call. Every part is a readable value, so the
+// id is reproducible from the document itself: sha256 of
+// [cluster, timestamp, ...parts] in JSON form.
+func documentID(cluster string, now time.Time, parts ...any) string {
+	identity := append([]any{cluster, now.UTC().Format(time.RFC3339Nano)}, parts...)
+	encoded, _ := json.Marshal(identity)
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
+}
 
 func (c *Client) write(ctx context.Context, index, id string, body []byte) (err error) {
 	body, err = sanitizeDocument(body)
