@@ -1,0 +1,65 @@
+{
+  "index_patterns": ["podwatcher-pod-metrics*"],
+  "priority": 500,
+  "_meta": {
+    "managed_by": "podwatcher",
+    "description": "POD_METRICS documents only. Prometheus label maps keep a closed whitelist of query-relevant keys; every other label stays in _source but is not indexed."
+  },
+  "template": {
+    "settings": {
+      "index.mapping.total_fields.limit": 500
+    },
+    "mappings": {
+      "dynamic": true,
+      "date_detection": false,
+      "dynamic_templates": [
+        {
+          "prom_metric_labels": {
+            "path_match": "metrics.metrics.*.metric",
+            "mapping": {
+              "type": "object",
+              "dynamic": false,
+              "properties": {
+                "container": { "type": "keyword" },
+                "resource": { "type": "keyword" },
+                "unit": { "type": "keyword" },
+                "cpu": { "type": "keyword" }
+              }
+            }
+          }
+        },
+        {
+          "prom_sample_timestamp": {
+            "path_match": "metrics.metrics.*.values.Timestamp",
+            "mapping": { "type": "double" }
+          }
+        },
+        {
+          "prom_sample_value": {
+            "path_match": "metrics.metrics.*.values.Value",
+            "mapping": { "type": "double", "ignore_malformed": true }
+          }
+        }
+      ],
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "indexedAt": { "type": "date" },
+        "applicationId": { "type": "keyword" },
+        "cluster": { "type": "keyword" },
+        "podName": { "type": "keyword" },
+        "type": { "type": "keyword" },
+        "metrics": {
+          "properties": {
+            "applicationId": { "type": "keyword" },
+            "namespace": { "type": "keyword" },
+            "podName": { "type": "keyword" },
+            "role": { "type": "keyword" },
+            "node": { "type": "keyword" },
+            "windowStart": { "type": "date" },
+            "windowEnd": { "type": "date" }
+          }
+        }
+      }
+    }
+  }
+}

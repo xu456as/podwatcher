@@ -76,10 +76,14 @@ type PodMetricsExportConfig struct {
 	// Enabled gates the exporter. Defaults to false so the feature is opt-in.
 	// Requires elasticsearch.address and prometheus.address to also be set
 	// in order to actually run; main.go checks all three before wiring up.
-	Enabled     bool `yaml:"enabled"`
-	QueueSize   int  `yaml:"queueSize"` // pending pod exports buffered before new ones are dropped
-	WorkerCount int  `yaml:"workers"`   // concurrent export workers
-	StepSeconds int  `yaml:"stepSeconds"`
+	Enabled bool `yaml:"enabled"`
+	// Index receives the POD_METRICS documents. Keeping them in a dedicated
+	// index isolates their label-heavy mapping from the lifecycle event
+	// mapping; an empty value falls back to elasticsearch.index.
+	Index       string `yaml:"index"`
+	QueueSize   int    `yaml:"queueSize"` // pending pod exports buffered before new ones are dropped
+	WorkerCount int    `yaml:"workers"`   // concurrent export workers
+	StepSeconds int    `yaml:"stepSeconds"`
 	// Queries maps an export name to its query. Entries merge with the
 	// built-in defaults, so one added entry exports one more metric.
 	Queries map[string]PodMetricsQuery `yaml:"queries"`
@@ -124,6 +128,7 @@ func DefaultConfig() *Config {
 		Elasticsearch: ElasticsearchConfig{PasswordEnv: "ES_PASSWORD", Index: "podwatcher-events", TimeoutSeconds: 20},
 		Prometheus:    PrometheusConfig{TimeoutSeconds: 20},
 		PodMetricsExport: PodMetricsExportConfig{
+			Index:       "podwatcher-pod-metrics",
 			QueueSize:   256,
 			WorkerCount: 2,
 			StepSeconds: 60,

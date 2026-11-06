@@ -45,21 +45,49 @@ type Event struct {
 }
 
 type Client struct {
-	timeout  time.Duration
-	sdk      *es.Client
-	index    string
-	cluster  string
-	redact   *strings.Replacer
-	authInfo string
+	timeout      time.Duration
+	sdk          *es.Client
+	index        string
+	metricsIndex string
+	cluster      string
+	redact       *strings.Replacer
+	authInfo     string
 }
 
-func NewClient(cfg config.ElasticsearchConfig, cluster string) (*Client, error) {
+// Option customizes a Client after the base Elasticsearch configuration has
+// been validated.
+type Option func(*Client) error
+
+// WithPodMetricsIndex routes POD_METRICS documents to their own index so the
+// label-heavy metrics mapping does not share the lifecycle event mapping.
+func WithPodMetricsIndex(index string) Option {
+	return func(c *Client) error {
+		if index == "" {
+			return nil // keep the event index
+		}
+		if err := validateIndexName("podMetricsExport.index", index); err != nil {
+			return err
+		}
+		c.metricsIndex = index
+		return nil
+	}
+}
+
+// validateIndexName rejects names Elasticsearch cannot use as an index.
+func validateIndexName(field, index string) error {
+	if index == "" || strings.ContainsAny(index, "/\\ *?\"<>|,#:") || strings.ToLower(index) != index || strings.HasPrefix(index, "_") || strings.HasPrefix(index, "-") || strings.HasPrefix(index, "+") || index == "." || index == ".." {
+		return fmt.Errorf("invalid %s", field)
+	}
+	return nil
+}
+
+func NewClient(cfg config.ElasticsearchConfig, cluster string, opts ...Option) (*Client, error) {
 	u, err := url.Parse(cfg.Address)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return nil, fmt.Errorf("elasticsearch.address must be an HTTP(S) URL without credentials, query or fragment")
 	}
-	if cfg.Index == "" || strings.ContainsAny(cfg.Index, "/\\ *?\"<>|,#:") || strings.ToLower(cfg.Index) != cfg.Index || strings.HasPrefix(cfg.Index, "_") || strings.HasPrefix(cfg.Index, "-") || strings.HasPrefix(cfg.Index, "+") || cfg.Index == "." || cfg.Index == ".." {
-		return nil, fmt.Errorf("invalid elasticsearch.index")
+	if err := validateIndexName("elasticsearch.index", cfg.Index); err != nil {
+		return nil, err
 	}
 	password, passwordSet := os.LookupEnv(cfg.PasswordEnv)
 	authInfo := fmt.Sprintf("username=%q password_env=%q password_empty=%t", cfg.Username, cfg.PasswordEnv, password == "")
@@ -98,11 +126,17 @@ func NewClient(cfg config.ElasticsearchConfig, cluster string) (*Client, error) 
 			replacements = append(replacements, secret, "[REDACTED]")
 		}
 	}
-	return &Client{
-		sdk: sdk, index: cfg.Index, cluster: cluster,
+	client := &Client{
+		sdk: sdk, index: cfg.Index, metricsIndex: cfg.Index, cluster: cluster,
 		timeout: time.Duration(cfg.TimeoutSeconds) * time.Second,
 		redact:  strings.NewReplacer(replacements...), authInfo: authInfo,
-	}, nil
+	}
+	for _, opt := range opts {
+		if err := opt(client); err != nil {
+			return nil, err
+		}
+	}
+	return client, nil
 }
 
 // Publish uses a stable id so retries and watch replays overwrite the same event.
@@ -130,7 +164,7 @@ func (c *Client) Publish(ctx context.Context, eventType string, pod *corev1.Pod,
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, id, body)
+	return c.write(ctx, c.index, id, body)
 }
 
 // Completion is distinct from Pod events and keeps status under application.
@@ -165,7 +199,7 @@ func (c *Client) PublishApplication(ctx context.Context, app store.ApplicationVi
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, hex.EncodeToString(hash[:]), body)
+	return c.write(ctx, c.index, hex.EncodeToString(hash[:]), body)
 }
 
 // PodMetrics is distinct from Pod events and Completion: it carries the
@@ -199,7 +233,7 @@ func (c *Client) PublishPodMetrics(ctx context.Context, doc podmetrics.PodMetric
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, hex.EncodeToString(hash[:]), body)
+	return c.write(ctx, c.metricsIndex, hex.EncodeToString(hash[:]), body)
 }
 
 // PublishError carries the actual sanitized document for debug logging only.
@@ -213,7 +247,7 @@ func (e *PublishError) Error() string        { return e.Err.Error() }
 func (e *PublishError) Unwrap() error        { return e.Err }
 func (e *PublishError) DebugPayload() string { return e.payload }
 
-func (c *Client) write(ctx context.Context, id string, body []byte) (err error) {
+func (c *Client) write(ctx context.Context, index, id string, body []byte) (err error) {
 	body, err = sanitizeDocument(body)
 	if err != nil {
 		return fmt.Errorf("sanitize Elasticsearch document: %w", err)
@@ -232,7 +266,7 @@ func (c *Client) write(ctx context.Context, id string, body []byte) (err error) 
 			}
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, c.timeout)
-		resp, requestErr := c.sdk.Index(c.index, bytes.NewReader(body), c.sdk.Index.WithDocumentID(id), c.sdk.Index.WithContext(attemptCtx))
+		resp, requestErr := c.sdk.Index(index, bytes.NewReader(body), c.sdk.Index.WithDocumentID(id), c.sdk.Index.WithContext(attemptCtx))
 		if requestErr != nil {
 			cancel()
 			// Strip request URLs (which may contain credentials or query tokens),
@@ -241,7 +275,7 @@ func (c *Client) write(ctx context.Context, id string, body []byte) (err error) 
 			if errors.As(requestErr, &urlErr) {
 				requestErr = urlErr.Err
 			}
-			err = fmt.Errorf("Elasticsearch request failed (index=%s attempt=%d/3): %s", c.index, attempt+1, c.safeDetail(requestErr.Error()))
+			err = fmt.Errorf("Elasticsearch request failed (index=%s attempt=%d/3): %s", index, attempt+1, c.safeDetail(requestErr.Error()))
 			continue
 		}
 		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody+1))
@@ -254,7 +288,7 @@ func (c *Client) write(ctx context.Context, id string, body []byte) (err error) 
 		if readErr != nil {
 			detail += "; reading error response: " + readErr.Error()
 		}
-		err = fmt.Errorf("Elasticsearch returned HTTP %d (index=%s attempt=%d/3): %s", resp.StatusCode, c.index, attempt+1, c.safeDetail(detail))
+		err = fmt.Errorf("Elasticsearch returned HTTP %d (index=%s attempt=%d/3): %s", resp.StatusCode, index, attempt+1, c.safeDetail(detail))
 		if resp.StatusCode != 429 && resp.StatusCode < 500 {
 			return err
 		}

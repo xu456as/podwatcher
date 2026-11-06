@@ -116,13 +116,15 @@ func main() {
 	var handlerOptions []handler.Option
 	var esPublisher *elasticsearch.Client
 	if cfg.Elasticsearch.Address != "" {
-		publisher, err := elasticsearch.NewClient(cfg.Elasticsearch, clusterName)
+		publisher, err := elasticsearch.NewClient(cfg.Elasticsearch, clusterName,
+			elasticsearch.WithPodMetricsIndex(cfg.PodMetricsExport.Index))
 		if err != nil {
 			klog.Fatalf("Failed to configure Elasticsearch: %v", err)
 		}
 		esPublisher = publisher
 		handlerOptions = append(handlerOptions, handler.WithDebug(cfg.Elasticsearch.IsDebug))
-		klog.Infof("Elasticsearch publishing enabled: index=%s timeoutSeconds=%d isDebug=%t insecureSkipVerify=%t", cfg.Elasticsearch.Index, cfg.Elasticsearch.TimeoutSeconds, cfg.Elasticsearch.IsDebug, cfg.Elasticsearch.InsecureSkipVerify)
+		klog.Infof("Elasticsearch publishing enabled: index=%s podMetricsIndex=%s timeoutSeconds=%d isDebug=%t insecureSkipVerify=%t",
+			cfg.Elasticsearch.Index, cfg.PodMetricsExport.Index, cfg.Elasticsearch.TimeoutSeconds, cfg.Elasticsearch.IsDebug, cfg.Elasticsearch.InsecureSkipVerify)
 	} else {
 		klog.Warning("Elasticsearch publishing disabled: elasticsearch.address is empty; check the loaded config file")
 	}
@@ -155,8 +157,8 @@ func main() {
 		)
 		handlerPublisher = &compositePublisher{events: esPublisher, podMetrics: podMetricsExporter}
 		podMetricsExporter.Start()
-		klog.Infof("Pod metrics export enabled: prometheus=%s stepSeconds=%d queries=%d queueSize=%d workers=%d",
-			cfg.Prometheus.Address, cfg.PodMetricsExport.StepSeconds, len(cfg.PodMetricsExport.Queries), cfg.PodMetricsExport.QueueSize, cfg.PodMetricsExport.WorkerCount)
+		klog.Infof("Pod metrics export enabled: prometheus=%s index=%s stepSeconds=%d queries=%d queueSize=%d workers=%d",
+			cfg.Prometheus.Address, cfg.PodMetricsExport.Index, cfg.PodMetricsExport.StepSeconds, len(cfg.PodMetricsExport.Queries), cfg.PodMetricsExport.QueueSize, cfg.PodMetricsExport.WorkerCount)
 	}
 	handlerOptions = append(handlerOptions, handler.WithPublisher(handlerPublisher))
 	eventHandler := handler.NewPodEventHandler(stateStore, handlerOptions...)

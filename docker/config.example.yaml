@@ -80,6 +80,10 @@ elasticsearch:
 # prometheus.address. The pending queue depth is reported to the OTel
 # collector as podwatcher.podmetrics.queue.depth.
 podMetricsExport:
+  # Dedicated index for POD_METRICS documents; keeps their label-heavy mapping
+  # away from the lifecycle event index above. Empty falls back to
+  # elasticsearch.index.
+  index: "podwatcher-pod-metrics"
   # Pending pod exports buffered before new ones are dropped; dropped pods
   # lose their export, while the raw samples stay queryable in Prometheus
   queueSize: 256

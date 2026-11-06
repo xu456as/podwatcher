@@ -533,6 +533,33 @@ func TestPublishPodMetricsDocument(t *testing.T) {
 	}
 }
 
+func TestPublishPodMetricsUsesDedicatedIndex(t *testing.T) {
+	var paths []string
+	srv := newTestESServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	c, err := NewClient(config.ElasticsearchConfig{Address: srv.URL, Index: "events"}, "cluster",
+		WithPodMetricsIndex("podwatcher-pod-metrics"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.PublishPodMetrics(context.Background(), podmetrics.PodMetricsDocument{ApplicationID: "app-e", Namespace: "default", PodName: "app-e-driver"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 || !strings.HasPrefix(paths[0], "/podwatcher-pod-metrics/") {
+		t.Fatalf("pod metrics must use the dedicated index, got %v", paths)
+	}
+	paths = paths[:0]
+	if err := c.Publish(context.Background(), "ADDED", testutil.ExecutorPod("executor", "app"), false); err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 || !strings.HasPrefix(paths[0], "/events/") {
+		t.Fatalf("lifecycle events must stay in the event index, got %v", paths)
+	}
+}
+
 func newTestESServer(handler http.Handler) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Elastic-Product", "Elasticsearch")

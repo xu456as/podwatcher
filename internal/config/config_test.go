@@ -41,6 +41,9 @@ func TestPodMetricsExportDefaults(t *testing.T) {
 	if e.Enabled {
 		t.Fatal("podMetricsExport.enabled must default to false (opt-in)")
 	}
+	if e.Index != "podwatcher-pod-metrics" {
+		t.Fatalf("podMetricsExport.index must default to a dedicated index, got %q", e.Index)
+	}
 	// The confirmed default selection must include all metrics with a
 	// pod/namespace selector template.
 	for _, name := range []string{
