@@ -12,7 +12,7 @@ helm repo add yunikorn https://apache.github.io/yunikorn-release
 helm repo update
 kubectl create namespace yunikorn
 helm install yunikorn yunikorn/yunikorn --namespace yunikorn --version 1.7.0
-
+kind load docker-image apache/spark:3.5.0 --name yunikorn-cluster
 yunikorn dashboard:
 http://localhost:9889/#/dashboard
 
@@ -28,3 +28,17 @@ kubectl apply -f spark-pi.yaml
 
 export k8s cluster config so that it can be read from podwatcher
 kind export kubeconfig --name yunikorn-cluster --kubeconfig ~/.kube/kind-config
+
+
+install prometheus:
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm install monitoring prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --create-namespace \
+  --set grafana.adminPassword=admin \
+  --set prometheus.prometheusSpec.resources.limits.cpu=500m \
+  --set prometheus.prometheusSpec.resources.limits.memory=512Mi
+kubectl get pods -n monitoring
+kubectl port-forward svc/monitoring-kube-prometheus-prometheus -n monitoring 9090:9090
+kubectl port-forward svc/monitoring-grafana -n monitoring 3000:80

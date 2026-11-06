@@ -1,0 +1,76 @@
+cluster:
+    # Empty preserves ConfigMap discovery; set to the injected variable name.
+  nameEnv: ""
+elasticsearch:
+  timeoutSeconds: 20
+  insecureSkipVerify: false
+  address: "http://localhost:9200"
+  username: ""
+  passwordEnv: "ES_PASSWORD"
+  index: "podwatcher-events"
+prometheus:
+  timeoutSeconds: 20
+  insecureSkipVerify: true
+  address: "http://localhost:9090"
+  token: ""
+log:
+  file: "/var/log/podwatcher/podwatcher.log"
+  maxSize: 100
+  maxNum: 5
+pods:
+  resumeFile: "/var/log/podwatcher/pods-resume.json"
+  stateFile: "/var/log/podwatcher/state.json"
+  maxApplications: 5000
+  maxPodRecords: 10000
+    # downstream checkpoint API for the watch resourceVersion; empty falls
+    # back to resumeFile. Override per environment in overlays.
+  checkpointUrl: ""
+  checkpointFlushSeconds: 10
+# Async export of a deleted Spark pod's lifecycle metrics to Elasticsearch.
+# Requires elasticsearch.address to be non-empty; prometheus.address above
+# feeds the queries. Queue depth is reported to the OTel collector as
+# podwatcher.podmetrics.queue.depth.
+podMetricsExport:
+  # Opt-in gate; must be true to wire up the exporter.
+  enabled: true
+  # Dedicated index for POD_METRICS documents; keeps their label-heavy mapping
+  # away from the lifecycle event index above. Empty falls back to
+  # elasticsearch.index.
+  index: "podwatcher-pod-metrics"
+  # Pending pod exports buffered before new ones are dropped
+  queueSize: 256
+  # Concurrent export workers
+  workers: 2
+  # Sampling step of the lifecycle range queries
+  stepSeconds: 30
+  # All templates pin container="main" (the Spark main container's name);
+  # each query returns a single series. {namespace} and {pod} are substituted
+  # per deleted pod; accumulate turns a gauge into a cumulative curve.
+  queries:
+    # CPU cores in use (counter rate, 5m smoothing window)
+    cpuUsage:
+      # expr: 'rate(container_cpu_usage_seconds_total{namespace="{namespace}",pod="{pod}",container="main"}[5m])'
+      expr: 'rate(container_cpu_usage_seconds_total{namespace="{namespace}",pod="{pod}"}[5m])'
+    # Cumulative CPU core-seconds; the last point is the lifetime total
+    cpuVcoreSeconds:
+      # expr: 'container_cpu_usage_seconds_total{namespace="{namespace}",pod="{pod}",container="main"}'
+      expr: 'container_cpu_usage_seconds_total{namespace="{namespace}",pod="{pod}"}'
+    # Instantaneous working set, the memory the kernel counts for reclaim/OOM
+    memoryWorkingSet:
+      # expr: 'container_memory_working_set_bytes{namespace="{namespace}",pod="{pod}",container="main"}'
+      expr: 'container_memory_working_set_bytes{namespace="{namespace}",pod="{pod}"}'
+    # Cumulative MB-seconds, the counterpart of cpuVcoreSeconds
+    memoryMbSeconds:
+      # expr: 'container_memory_working_set_bytes{namespace="{namespace}",pod="{pod}",container="main"} / 1024 / 1024'
+      expr: 'container_memory_working_set_bytes{namespace="{namespace}",pod="{pod}"} / 1024 / 1024'
+      accumulate: true
+    # Writable-layer filesystem usage
+    fsUsage:
+      # expr: 'container_fs_usage_bytes{namespace="{namespace}",pod="{pod}",container="main"}'
+      expr: 'container_fs_usage_bytes{namespace="{namespace}",pod="{pod}"}'
+    resourceRequests:
+      # expr: 'kube_pod_container_resource_requests{namespace="{namespace}",pod="{pod}",container="main"}'
+      expr: 'kube_pod_container_resource_requests{namespace="{namespace}",pod="{pod}"}'
+    resourceLimits:
+      # expr: 'kube_pod_container_resource_limits{namespace="{namespace}",pod="{pod}",container="main"}'
+      expr: 'kube_pod_container_resource_limits{namespace="{namespace}",pod="{pod}"}'

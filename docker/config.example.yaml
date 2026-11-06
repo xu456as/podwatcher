@@ -1,0 +1,131 @@
+#   1. command parameter: ./podwatcher -config=config.yaml
+#   2. env:  PODWATCHER_CONFIG=config.yaml ./podwatcher
+#
+# env > config file
+
+log:
+  # env: PODWATCHER_LOG_FILE
+  file: "/var/log/podwatcher/podwatcher.log"
+
+  # max size of each log file
+  maxSize: 100
+
+  maxNum: 5
+
+pods:
+  # persist the pod watch resourceVersion so a short restart can resume and
+  # replay pod lifecycle events missed while the process was down
+  # (env: PODWATCHER_PODS_RESUME_FILE). Empty disables resume.
+  # Use a persistent volume to survive pod rescheduling; emptyDir survives
+  # container restarts within the same pod.
+  resumeFile: "/var/log/podwatcher/pods-resume.json"
+
+  # single file persisting application credentials (used to fetch Spark event
+  # logs) together with driver/executor pod coordinates (name/node/time
+  # window, used to look up historical CPU/memory/disk metrics after pod
+  # deletion)
+  # (env: PODWATCHER_STATE_FILE)
+  stateFile: "/var/log/podwatcher/state.json"
+  # max application records kept; oldest deleted records are evicted and take
+  # their pod records with them
+  # (env: PODWATCHER_APPLICATIONS_MAX)
+  maxApplications: 5000
+
+  # max pod records kept; oldest deleted executor records are evicted while a
+  # live application's driver is retained
+  # (env: PODWATCHER_POD_RECORDS_MAX)
+  maxPodRecords: 10000
+
+  # downstream checkpoint API base URL for the watch resourceVersion.
+  # When set, resume uses HTTP GET/PUT {checkpointUrl}/checkpoints/<key>
+  # instead of resumeFile (env: PODWATCHER_CHECKPOINT_URL).
+  checkpointUrl: ""
+  # resourceVersion checkpoint flush interval in seconds; must stay well
+  # below the cluster watch-history retention window
+  # (env: PODWATCHER_CHECKPOINT_FLUSH_SECONDS).
+  checkpointFlushSeconds: 10
+
+# Cluster identity from nameEnv, or ConfigMap when nameEnv is empty.
+# Stamped into applications, pod records and ES events once at startup.
+cluster:
+  # Empty keeps legacy ConfigMap discovery.
+  nameEnv: "CLUSTER_NAME"
+  # configmap name (env: PODWATCHER_CLUSTER_CM_NAME)
+  configMapName: "cluster-cm"
+  # namespace of the configmap. Empty uses the pod namespace via the
+  # POD_NAMESPACE downward API, then "default"
+  # (env: PODWATCHER_CLUSTER_CM_NAMESPACE)
+  configMapNamespace: ""
+  # key holding the cluster identity
+  # (env: PODWATCHER_CLUSTER_CM_KEY)
+  configMapKey: "currentCluster"
+
+elasticsearch:
+  # Log full actual document JSON only when ES publishing fails.
+  isDebug: false
+  # Per-attempt timeout in seconds; retries may take up to three attempts.
+  timeoutSeconds: 20
+  # Set true to skip HTTPS certificate and hostname verification.
+  insecureSkipVerify: false
+  # Empty disables ES publishing.
+  address: ""
+  username: ""
+  # Environment variable NAME, not the password itself. When username is set,
+  # this variable must exist in the container and contain a non-empty password.
+  passwordEnv: "ES_PASSWORD"
+  index: "podwatcher-events"
+
+# Async exporter writing a deleted Spark pod's (driver or executor) Prometheus
+# metrics back to Elasticsearch. Requires elasticsearch.address and
+# prometheus.address. The pending queue depth is reported to the OTel
+# collector as podwatcher.podmetrics.queue.depth.
+podMetricsExport:
+  # Dedicated index for POD_METRICS documents; keeps their label-heavy mapping
+  # away from the lifecycle event index above. Empty falls back to
+  # elasticsearch.index.
+  index: "podwatcher-pod-metrics"
+  # Pending pod exports buffered before new ones are dropped; dropped pods
+  # lose their export, while the raw samples stay queryable in Prometheus
+  queueSize: 256
+  # Concurrent export workers; each export runs one Prometheus range query
+  # per entry in queries plus one Elasticsearch index request
+  workers: 2
+  # Sampling step of the lifecycle range queries
+  stepSeconds: 60
+  # Export name -> query; each entry has an expr (PromQL template where
+  # {namespace} and {pod} are substituted per deleted pod) and an optional
+  # accumulate flag (replace per-step values with their running integral
+  # value x stepSeconds, e.g. gauge MB -> cumulative MB-seconds). Entries
+  # merge with the built-in defaults, so adding one entry exports one more
+  # metric; redefining a built-in name overrides it. Remove an export by
+  # restating the full desired map.
+  queries:
+    # All templates pin container="main" (the Spark main container's name);
+    # each query returns a single series. Pods with a differently named main
+    # container produce no data — override templates as needed.
+    cpuUsage:
+      expr: 'rate(container_cpu_usage_seconds_total{namespace="{namespace}",pod="{pod}",container="main"}[5m])'
+    # Cumulative CPU core-seconds; the last point is the lifetime total
+    cpuVcoreSeconds:
+      expr: 'container_cpu_usage_seconds_total{namespace="{namespace}",pod="{pod}",container="main"}'
+    memoryWorkingSet:
+      expr: 'container_memory_working_set_bytes{namespace="{namespace}",pod="{pod}",container="main"}'
+    # Cumulative MB-seconds, the counterpart of cpuVcoreSeconds
+    memoryMbSeconds:
+      expr: 'container_memory_working_set_bytes{namespace="{namespace}",pod="{pod}",container="main"} / 1024 / 1024'
+      accumulate: true
+    fsUsage:
+      expr: 'container_fs_usage_bytes{namespace="{namespace}",pod="{pod}",container="main"}'
+    resourceRequests:
+      expr: 'kube_pod_container_resource_requests{namespace="{namespace}",pod="{pod}",container="main"}'
+    resourceLimits:
+      expr: 'kube_pod_container_resource_limits{namespace="{namespace}",pod="{pod}",container="main"}'
+    # Useful additions:
+    # cpuThrottledPeriods:
+    #   expr: 'sum by (container) (rate(container_cpu_cfs_throttled_periods_total{namespace="{namespace}",pod="{pod}"}[5m]))'
+    # memoryMax:
+    #   expr: 'container_memory_max_usage_bytes{namespace="{namespace}",pod="{pod}"}'
+    # networkReceive:
+    #   expr: 'sum by (pod) (rate(container_network_receive_bytes_total{namespace="{namespace}",pod="{pod}"}[5m]))'
+    # networkTransmit: 'sum by (pod) (rate(container_network_transmit_bytes_total{namespace="{namespace}",pod="{pod}"}[5m]))'
+    # restarts: 'max by (container) (kube_pod_container_status_restarts_total{namespace="{namespace}",pod="{pod}"})'

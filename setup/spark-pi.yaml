@@ -13,6 +13,8 @@ spec:
   sparkVersion: 3.5.0
   driver:
     cores: 1
+    coreRequest: "500m"
+    coreLimit: "500m"
     memory: "512m"
     labels:
       owner: "team"
@@ -20,8 +22,10 @@ spec:
       queue: root.default
     serviceAccount: spark-operator-spark
   executor:
-    instances: 2
+    instances: 1
     cores: 1
+    coreRequest: "500m"
+    coreLimit: "500m"
     memory: "512m"
     labels:
       owner: "team"

@@ -1,0 +1,57 @@
+{
+  "index_patterns": ["podwatcher-pod-metrics*"],
+  "priority": 500,
+  "_meta": {
+    "managed_by": "podwatcher",
+    "description": "POD_METRICS documents only. The export name is a field value (metrics.metrics.name) instead of an object key, so the mapping is fixed no matter how many Prometheus queries are configured. Prometheus label maps keep a closed whitelist of query-relevant keys; every other label stays in _source but is not indexed."
+  },
+  "template": {
+    "settings": {
+      "index.mapping.total_fields.limit": 1000
+    },
+    "mappings": {
+      "dynamic": true,
+      "date_detection": false,
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "indexedAt": { "type": "date" },
+        "applicationId": { "type": "keyword" },
+        "cluster": { "type": "keyword" },
+        "podName": { "type": "keyword" },
+        "type": { "type": "keyword" },
+        "metrics": {
+          "properties": {
+            "applicationId": { "type": "keyword" },
+            "namespace": { "type": "keyword" },
+            "podName": { "type": "keyword" },
+            "role": { "type": "keyword" },
+            "node": { "type": "keyword" },
+            "windowStart": { "type": "date" },
+            "windowEnd": { "type": "date" },
+            "metrics": {
+              "properties": {
+                "name": { "type": "keyword" },
+                "metric": {
+                  "type": "object",
+                  "dynamic": false,
+                  "properties": {
+                    "container": { "type": "keyword" },
+                    "resource": { "type": "keyword" },
+                    "unit": { "type": "keyword" },
+                    "cpu": { "type": "keyword" }
+                  }
+                },
+                "values": {
+                  "properties": {
+                    "Timestamp": { "type": "double" },
+                    "Value": { "type": "double", "ignore_malformed": true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

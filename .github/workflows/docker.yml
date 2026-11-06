@@ -1,0 +1,65 @@
+name: build-and-push-image
+
+# 触发方式：
+#   1. 手动触发（Actions 页面选本 workflow，可填 tag，默认 latest）
+#   2. 推送形如 v0.0.1 的 git tag（镜像 tag 自动用 v0.0.1）
+# 推送前需要在仓库 Settings -> Secrets and variables -> Actions 里配置：
+#   DOCKERHUB_USERNAME  Docker Hub 用户名
+#   DOCKERHUB_TOKEN     Docker Hub Access Token（不要用密码）
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "镜像 tag（默认 latest）"
+        required: false
+        default: "latest"
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 手动触发时取 inputs.tag；tag 推送时 inputs 为空，取 git tag 名
+      - name: Resolve image tag
+        id: meta
+        run: |
+          # 镜像名 = <GitHub 仓库 owner>/<仓库名>，随仓库所在账号自动变化
+          # （如 ianwoolf/podwatcher、xu456as/podwatcher）。
+          # Docker Hub 要求全小写，统一转小写。
+          # 若 Docker Hub 账号名与 GitHub owner 不一致，可改用
+          # secrets.DOCKERHUB_USERNAME 作为前缀。
+          IMAGE="${{ github.repository }}"
+          echo "image=${IMAGE,,}" >> "$GITHUB_OUTPUT"
+          TAG="${{ github.event.inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.image }}:latest
+          # 需要 arm64 时取消下一行注释（会走 QEMU，构建变慢）：
+          # platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

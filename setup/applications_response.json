@@ -1,0 +1,184 @@
+{
+    "applications": [
+        {
+            "applicationId": "yunikorn-podwatcher-autogen",
+            "sparkAppSelector": "",
+            "pods": [
+                {
+                    "name": "podwatcher-d8d468b8f-t8crv",
+                    "namespace": "podwatcher",
+                    "applicationId": "yunikorn-podwatcher-autogen",
+                    "sparkAppSelector": "",
+                    "phase": "Succeeded",
+                    "status": "deleted",
+                    "node": "iv-yefc18gm4gfbyak1tnxc",
+                    "labels": {
+                        "app": "podwatcher",
+                        "applicationId": "yunikorn-podwatcher-autogen",
+                        "pod-template-hash": "d8d468b8f",
+                        "yunikorn.apache.org/app-id": "yunikorn-podwatcher-autogen"
+                    },
+                    "updatedAt": "2026-05-26T06:36:31.86242453Z"
+                },
+                {
+                    "name": "podwatcher-66c745b8c5-l6zr7",
+                    "namespace": "podwatcher",
+                    "applicationId": "yunikorn-podwatcher-autogen",
+                    "sparkAppSelector": "",
+                    "phase": "Running",
+                    "status": "running",
+                    "node": "iv-yefc18gm4gfbyak1tnxc",
+                    "labels": {
+                        "app": "podwatcher",
+                        "applicationId": "yunikorn-podwatcher-autogen",
+                        "pod-template-hash": "66c745b8c5",
+                        "yunikorn.apache.org/app-id": "yunikorn-podwatcher-autogen"
+                    },
+                    "updatedAt": "2026-05-26T06:40:19.159200933Z"
+                }
+            ],
+            "firstSeenAt": "2026-05-26T06:36:19.157060409Z",
+            "lastUpdatedAt": "2026-05-26T06:40:19.159200933Z",
+            "podCount": 2
+        },
+        {
+            "applicationId": "yunikorn-spark-operator-autogen",
+            "sparkAppSelector": "",
+            "pods": [
+                {
+                    "name": "spark-operator-controller-68bbdd487-df6mk",
+                    "namespace": "spark-operator",
+                    "applicationId": "yunikorn-spark-operator-autogen",
+                    "sparkAppSelector": "",
+                    "phase": "Running",
+                    "status": "running",
+                    "node": "iv-yefc18gm4gfbyak1tnxc",
+                    "labels": {
+                        "app.kubernetes.io/component": "controller",
+                        "app.kubernetes.io/instance": "spark-operator",
+                        "app.kubernetes.io/name": "spark-operator",
+                        "applicationId": "yunikorn-spark-operator-autogen",
+                        "pod-template-hash": "68bbdd487",
+                        "yunikorn.apache.org/app-id": "yunikorn-spark-operator-autogen"
+                    },
+                    "updatedAt": "2026-05-26T06:40:19.159207247Z"
+                },
+                {
+                    "name": "spark-operator-webhook-5bd5ff9d6-6v96j",
+                    "namespace": "spark-operator",
+                    "applicationId": "yunikorn-spark-operator-autogen",
+                    "sparkAppSelector": "",
+                    "phase": "Running",
+                    "status": "running",
+                    "node": "iv-yefc18gm4gfbyak1tnxc",
+                    "labels": {
+                        "app.kubernetes.io/component": "webhook",
+                        "app.kubernetes.io/instance": "spark-operator",
+                        "app.kubernetes.io/name": "spark-operator",
+                        "applicationId": "yunikorn-spark-operator-autogen",
+                        "pod-template-hash": "5bd5ff9d6",
+                        "yunikorn.apache.org/app-id": "yunikorn-spark-operator-autogen"
+                    },
+                    "updatedAt": "2026-05-26T06:40:19.159214453Z"
+                }
+            ],
+            "firstSeenAt": "2026-05-26T06:36:19.157436684Z",
+            "lastUpdatedAt": "2026-05-26T06:40:19.159214453Z",
+            "podCount": 2
+        },
+        {
+            "applicationId": "spark-67911b5821fa4f30ab5ebd8476c10ab6",
+            "sparkAppSelector": "spark-67911b5821fa4f30ab5ebd8476c10ab6",
+            "pods": [
+                {
+                    "name": "spark-pi-yunikorn-driver",
+                    "namespace": "default",
+                    "applicationId": "",
+                    "sparkAppSelector": "spark-67911b5821fa4f30ab5ebd8476c10ab6",
+                    "phase": "Succeeded",
+                    "status": "succeeded",
+                    "node": "iv-yefc18gm4gfbyak1tnxc",
+                    "labels": {
+                        "env": "dev",
+                        "owner": "team",
+                        "queue": "root.default",
+                        "spark-app-name": "spark-pi-yunikorn",
+                        "spark-app-selector": "spark-67911b5821fa4f30ab5ebd8476c10ab6",
+                        "spark-role": "driver",
+                        "spark-version": "4.0.1",
+                        "sparkoperator.k8s.io/app-name": "spark-pi-yunikorn",
+                        "sparkoperator.k8s.io/launched-by-spark-operator": "true",
+                        "sparkoperator.k8s.io/mutated-by-spark-operator": "true",
+                        "sparkoperator.k8s.io/submission-id": "931b3752-03fc-41c1-8a3f-44f326dd544c"
+                    },
+                    "updatedAt": "2026-05-26T06:40:19.159158888Z"
+                },
+                {
+                    "name": "tg-spark-67911b5821fa4f30ab5ebd-spark-driver-1posuqc0po",
+                    "namespace": "default",
+                    "applicationId": "spark-67911b5821fa4f30ab5ebd8476c10ab6",
+                    "sparkAppSelector": "",
+                    "phase": "Pending",
+                    "status": "deleted",
+                    "node": "iv-yefc18gm4gfbyak1tnxc",
+                    "labels": {
+                        "applicationId": "spark-67911b5821fa4f30ab5ebd8476c10ab6",
+                        "env": "dev",
+                        "owner": "team",
+                        "queue": "root.default",
+                        "yunikorn.apache.org/app-id": "spark-67911b5821fa4f30ab5ebd8476c10ab6",
+                        "yunikorn.apache.org/queue": "root.default"
+                    },
+                    "updatedAt": "2026-05-26T06:39:05.280444486Z"
+                },
+                {
+                    "name": "tg-spark-67911b5821fa4f30ab5ebd-spark-executor-bel5ta9eby",
+                    "namespace": "default",
+                    "applicationId": "spark-67911b5821fa4f30ab5ebd8476c10ab6",
+                    "sparkAppSelector": "",
+                    "phase": "Running",
+                    "status": "deleted",
+                    "node": "iv-yefc18gm4gfbyak1tnxc",
+                    "labels": {
+                        "applicationId": "spark-67911b5821fa4f30ab5ebd8476c10ab6",
+                        "env": "dev",
+                        "owner": "team",
+                        "queue": "root.default",
+                        "yunikorn.apache.org/app-id": "spark-67911b5821fa4f30ab5ebd8476c10ab6",
+                        "yunikorn.apache.org/queue": "root.default"
+                    },
+                    "updatedAt": "2026-05-26T06:39:25.253048655Z"
+                },
+                {
+                    "name": "spark-pi-b0040f9e63025411-exec-1",
+                    "namespace": "default",
+                    "applicationId": "",
+                    "sparkAppSelector": "spark-67911b5821fa4f30ab5ebd8476c10ab6",
+                    "phase": "Succeeded",
+                    "status": "deleted",
+                    "node": "iv-yefc18gm4gfbyak1tnxc",
+                    "labels": {
+                        "env": "dev",
+                        "owner": "team",
+                        "queue": "root.default",
+                        "spark-app-name": "spark-pi",
+                        "spark-app-selector": "spark-67911b5821fa4f30ab5ebd8476c10ab6",
+                        "spark-exec-id": "1",
+                        "spark-exec-resourceprofile-id": "0",
+                        "spark-role": "executor",
+                        "spark-version": "3.5.0",
+                        "sparkoperator.k8s.io/app-name": "spark-pi-yunikorn",
+                        "sparkoperator.k8s.io/launched-by-spark-operator": "true",
+                        "sparkoperator.k8s.io/mutated-by-spark-operator": "true",
+                        "sparkoperator.k8s.io/submission-id": "931b3752-03fc-41c1-8a3f-44f326dd544c"
+                    },
+                    "updatedAt": "2026-05-26T06:39:43.397447853Z"
+                }
+            ],
+            "firstSeenAt": "2026-05-26T06:39:01.669641636Z",
+            "lastUpdatedAt": "2026-05-26T06:40:19.159158888Z",
+            "podCount": 4
+        }
+    ],
+    "totalCount": 4
+}
