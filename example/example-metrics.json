@@ -1,0 +1,672 @@
+{
+  "_index": "podwatcher-pod-metrics",
+  "_id": "79d2671a8bcf5a3064759257b64c7280df69ee077434c569e6d5fe9b0ff46452",
+  "_version": 1,
+  "_score": 0,
+  "_source": {
+    "@timestamp": "2026-11-06T08:01:30.474763Z",
+    "applicationId": "",
+    "cluster": "",
+    "indexedAt": "2026-11-06T08:01:30.474763Z",
+    "metrics": {
+      "applicationId": "",
+      "metrics": [
+        {
+          "metric": {
+            "container": "spark-kubernetes-executor",
+            "cpu": "total",
+            "endpoint": "https-metrics",
+            "id": "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369.scope",
+            "image": "docker.io/apache/spark:3.5.0",
+            "instance": "172.19.0.3:10250",
+            "job": "kubelet",
+            "metrics_path": "/metrics/cadvisor",
+            "name": "f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "service": "monitoring-kube-prometheus-kubelet"
+          },
+          "name": "cpuUsage",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "0.039465767887637684"
+            }
+          ]
+        },
+        {
+          "metric": {
+            "cpu": "total",
+            "endpoint": "https-metrics",
+            "id": "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee.scope",
+            "image": "registry.k8s.io/pause:3.10",
+            "instance": "172.19.0.3:10250",
+            "job": "kubelet",
+            "metrics_path": "/metrics/cadvisor",
+            "name": "02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "service": "monitoring-kube-prometheus-kubelet"
+          },
+          "name": "cpuUsage",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "0.00001912666666666669"
+            }
+          ]
+        },
+        {
+          "metric": {
+            "__name__": "container_cpu_usage_seconds_total",
+            "container": "spark-kubernetes-executor",
+            "cpu": "total",
+            "endpoint": "https-metrics",
+            "id": "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369.scope",
+            "image": "docker.io/apache/spark:3.5.0",
+            "instance": "172.19.0.3:10250",
+            "job": "kubelet",
+            "metrics_path": "/metrics/cadvisor",
+            "name": "f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "service": "monitoring-kube-prometheus-kubelet"
+          },
+          "name": "cpuVcoreSeconds",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "11.214101"
+            }
+          ]
+        },
+        {
+          "metric": {
+            "__name__": "container_cpu_usage_seconds_total",
+            "cpu": "total",
+            "endpoint": "https-metrics",
+            "id": "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice",
+            "instance": "172.19.0.3:10250",
+            "job": "kubelet",
+            "metrics_path": "/metrics/cadvisor",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "service": "monitoring-kube-prometheus-kubelet"
+          },
+          "name": "cpuVcoreSeconds",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "6.469708"
+            }
+          ]
+        },
+        {
+          "metric": {
+            "__name__": "container_cpu_usage_seconds_total",
+            "cpu": "total",
+            "endpoint": "https-metrics",
+            "id": "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee.scope",
+            "image": "registry.k8s.io/pause:3.10",
+            "instance": "172.19.0.3:10250",
+            "job": "kubelet",
+            "metrics_path": "/metrics/cadvisor",
+            "name": "02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "service": "monitoring-kube-prometheus-kubelet"
+          },
+          "name": "cpuVcoreSeconds",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "0.035137"
+            }
+          ]
+        },
+        {
+          "metric": {
+            "container": "spark-kubernetes-executor",
+            "endpoint": "https-metrics",
+            "id": "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369.scope",
+            "image": "docker.io/apache/spark:3.5.0",
+            "instance": "172.19.0.3:10250",
+            "job": "kubelet",
+            "metrics_path": "/metrics/cadvisor",
+            "name": "f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "service": "monitoring-kube-prometheus-kubelet"
+          },
+          "name": "memoryMbSeconds",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "8919.7265625"
+            }
+          ]
+        },
+        {
+          "metric": {
+            "endpoint": "https-metrics",
+            "id": "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice",
+            "instance": "172.19.0.3:10250",
+            "job": "kubelet",
+            "metrics_path": "/metrics/cadvisor",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "service": "monitoring-kube-prometheus-kubelet"
+          },
+          "name": "memoryMbSeconds",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "7220.2734375"
+            }
+          ]
+        },
+        {
+          "metric": {
+            "endpoint": "https-metrics",
+            "id": "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee.scope",
+            "image": "registry.k8s.io/pause:3.10",
+            "instance": "172.19.0.3:10250",
+            "job": "kubelet",
+            "metrics_path": "/metrics/cadvisor",
+            "name": "02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "service": "monitoring-kube-prometheus-kubelet"
+          },
+          "name": "memoryMbSeconds",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "5.7421875"
+            }
+          ]
+        },
+        {
+          "metric": {
+            "__name__": "container_memory_working_set_bytes",
+            "container": "spark-kubernetes-executor",
+            "endpoint": "https-metrics",
+            "id": "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369.scope",
+            "image": "docker.io/apache/spark:3.5.0",
+            "instance": "172.19.0.3:10250",
+            "job": "kubelet",
+            "metrics_path": "/metrics/cadvisor",
+            "name": "f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "service": "monitoring-kube-prometheus-kubelet"
+          },
+          "name": "memoryWorkingSet",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "311767040"
+            }
+          ]
+        },
+        {
+          "metric": {
+            "__name__": "container_memory_working_set_bytes",
+            "endpoint": "https-metrics",
+            "id": "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice",
+            "instance": "172.19.0.3:10250",
+            "job": "kubelet",
+            "metrics_path": "/metrics/cadvisor",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "service": "monitoring-kube-prometheus-kubelet"
+          },
+          "name": "memoryWorkingSet",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "252366848"
+            }
+          ]
+        },
+        {
+          "metric": {
+            "__name__": "container_memory_working_set_bytes",
+            "endpoint": "https-metrics",
+            "id": "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee.scope",
+            "image": "registry.k8s.io/pause:3.10",
+            "instance": "172.19.0.3:10250",
+            "job": "kubelet",
+            "metrics_path": "/metrics/cadvisor",
+            "name": "02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "service": "monitoring-kube-prometheus-kubelet"
+          },
+          "name": "memoryWorkingSet",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "200704"
+            }
+          ]
+        },
+        {
+          "metric": {
+            "__name__": "kube_pod_container_resource_limits",
+            "container": "spark-kubernetes-executor",
+            "endpoint": "http",
+            "instance": "10.244.1.3:8080",
+            "job": "kube-state-metrics",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "resource": "cpu",
+            "service": "monitoring-kube-state-metrics",
+            "uid": "98db5eec-b7ac-4db0-8788-9e605db65d69",
+            "unit": "core"
+          },
+          "name": "resourceLimits",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "0.5"
+            }
+          ]
+        },
+        {
+          "metric": {
+            "__name__": "kube_pod_container_resource_limits",
+            "container": "spark-kubernetes-executor",
+            "endpoint": "http",
+            "instance": "10.244.1.3:8080",
+            "job": "kube-state-metrics",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "resource": "memory",
+            "service": "monitoring-kube-state-metrics",
+            "uid": "98db5eec-b7ac-4db0-8788-9e605db65d69",
+            "unit": "byte"
+          },
+          "name": "resourceLimits",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "939524096"
+            }
+          ]
+        },
+        {
+          "metric": {
+            "__name__": "kube_pod_container_resource_requests",
+            "container": "spark-kubernetes-executor",
+            "endpoint": "http",
+            "instance": "10.244.1.3:8080",
+            "job": "kube-state-metrics",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "resource": "cpu",
+            "service": "monitoring-kube-state-metrics",
+            "uid": "98db5eec-b7ac-4db0-8788-9e605db65d69",
+            "unit": "core"
+          },
+          "name": "resourceRequests",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "0.5"
+            }
+          ]
+        },
+        {
+          "metric": {
+            "__name__": "kube_pod_container_resource_requests",
+            "container": "spark-kubernetes-executor",
+            "endpoint": "http",
+            "instance": "10.244.1.3:8080",
+            "job": "kube-state-metrics",
+            "namespace": "default",
+            "node": "yunikorn-cluster-worker",
+            "pod": "spark-pi-85f51ba1afdfd5f3-exec-1",
+            "resource": "memory",
+            "service": "monitoring-kube-state-metrics",
+            "uid": "98db5eec-b7ac-4db0-8788-9e605db65d69",
+            "unit": "byte"
+          },
+          "name": "resourceRequests",
+          "values": [
+            {
+              "Timestamp": 1793952088,
+              "Value": "939524096"
+            }
+          ]
+        }
+      ],
+      "namespace": "default",
+      "node": "yunikorn-cluster-worker",
+      "podName": "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "role": "",
+      "windowEnd": "2026-11-06T16:01:29+08:00",
+      "windowStart": "2026-11-06T16:00:58+08:00"
+    },
+    "podName": "spark-pi-85f51ba1afdfd5f3-exec-1",
+    "type": "POD_METRICS"
+  },
+  "fields": {
+    "cluster": [
+      ""
+    ],
+    "metrics.metrics.metric.id": [
+      "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369.scope",
+      "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee.scope",
+      "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369.scope",
+      "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice",
+      "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee.scope",
+      "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369.scope",
+      "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice",
+      "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee.scope",
+      "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369.scope",
+      "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice",
+      "/kubelet.slice/kubelet-kubepods.slice/kubelet-kubepods-pod98db5eec_b7ac_4db0_8788_9e605db65d69.slice/cri-containerd-02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee.scope"
+    ],
+    "metrics.metrics.metric.service": [
+      "monitoring-kube-prometheus-kubelet",
+      "monitoring-kube-prometheus-kubelet",
+      "monitoring-kube-prometheus-kubelet",
+      "monitoring-kube-prometheus-kubelet",
+      "monitoring-kube-prometheus-kubelet",
+      "monitoring-kube-prometheus-kubelet",
+      "monitoring-kube-prometheus-kubelet",
+      "monitoring-kube-prometheus-kubelet",
+      "monitoring-kube-prometheus-kubelet",
+      "monitoring-kube-prometheus-kubelet",
+      "monitoring-kube-prometheus-kubelet",
+      "monitoring-kube-state-metrics",
+      "monitoring-kube-state-metrics",
+      "monitoring-kube-state-metrics",
+      "monitoring-kube-state-metrics"
+    ],
+    "metrics.metrics.metric.resource": [
+      "cpu",
+      "memory",
+      "cpu",
+      "memory"
+    ],
+    "type": [
+      "POD_METRICS"
+    ],
+    "metrics.metrics.metric.name": [
+      "f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369",
+      "02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee",
+      "f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369",
+      "02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee",
+      "f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369",
+      "02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee",
+      "f6630785eddf960507e6834318f6280a5682a011cdc4688c1da4e46deb10d369",
+      "02f7866f55d0ea0d388c6b648b5d6752bec66ecd3a963f90dc3713779fcf9bee"
+    ],
+    "metrics.metrics.values.Value": [
+      0.039465767887637684,
+      0.00001912666666666669,
+      11.214101,
+      6.469708,
+      0.035137,
+      8919.7265625,
+      7220.2734375,
+      5.7421875,
+      311767040,
+      252366848,
+      200704,
+      0.5,
+      939524096,
+      0.5,
+      939524096
+    ],
+    "metrics.metrics.metric.node": [
+      "yunikorn-cluster-worker",
+      "yunikorn-cluster-worker",
+      "yunikorn-cluster-worker",
+      "yunikorn-cluster-worker",
+      "yunikorn-cluster-worker",
+      "yunikorn-cluster-worker",
+      "yunikorn-cluster-worker",
+      "yunikorn-cluster-worker",
+      "yunikorn-cluster-worker",
+      "yunikorn-cluster-worker",
+      "yunikorn-cluster-worker",
+      "yunikorn-cluster-worker",
+      "yunikorn-cluster-worker",
+      "yunikorn-cluster-worker",
+      "yunikorn-cluster-worker"
+    ],
+    "metrics.metrics.name": [
+      "cpuUsage",
+      "cpuUsage",
+      "cpuVcoreSeconds",
+      "cpuVcoreSeconds",
+      "cpuVcoreSeconds",
+      "memoryMbSeconds",
+      "memoryMbSeconds",
+      "memoryMbSeconds",
+      "memoryWorkingSet",
+      "memoryWorkingSet",
+      "memoryWorkingSet",
+      "resourceLimits",
+      "resourceLimits",
+      "resourceRequests",
+      "resourceRequests"
+    ],
+    "metrics.podName": [
+      "spark-pi-85f51ba1afdfd5f3-exec-1"
+    ],
+    "metrics.metrics.metric.uid": [
+      "98db5eec-b7ac-4db0-8788-9e605db65d69",
+      "98db5eec-b7ac-4db0-8788-9e605db65d69",
+      "98db5eec-b7ac-4db0-8788-9e605db65d69",
+      "98db5eec-b7ac-4db0-8788-9e605db65d69"
+    ],
+    "metrics.windowEnd": [
+      "2026-11-06T08:01:29.000Z"
+    ],
+    "metrics.metrics.metric.job": [
+      "kubelet",
+      "kubelet",
+      "kubelet",
+      "kubelet",
+      "kubelet",
+      "kubelet",
+      "kubelet",
+      "kubelet",
+      "kubelet",
+      "kubelet",
+      "kubelet",
+      "kube-state-metrics",
+      "kube-state-metrics",
+      "kube-state-metrics",
+      "kube-state-metrics"
+    ],
+    "indexedAt": [
+      "2026-11-06T08:01:30.474Z"
+    ],
+    "metrics.namespace": [
+      "default"
+    ],
+    "metrics.metrics.metric.image": [
+      "docker.io/apache/spark:3.5.0",
+      "registry.k8s.io/pause:3.10",
+      "docker.io/apache/spark:3.5.0",
+      "registry.k8s.io/pause:3.10",
+      "docker.io/apache/spark:3.5.0",
+      "registry.k8s.io/pause:3.10",
+      "docker.io/apache/spark:3.5.0",
+      "registry.k8s.io/pause:3.10"
+    ],
+    "metrics.metrics.metric.instance": [
+      "172.19.0.3:10250",
+      "172.19.0.3:10250",
+      "172.19.0.3:10250",
+      "172.19.0.3:10250",
+      "172.19.0.3:10250",
+      "172.19.0.3:10250",
+      "172.19.0.3:10250",
+      "172.19.0.3:10250",
+      "172.19.0.3:10250",
+      "172.19.0.3:10250",
+      "172.19.0.3:10250",
+      "10.244.1.3:8080",
+      "10.244.1.3:8080",
+      "10.244.1.3:8080",
+      "10.244.1.3:8080"
+    ],
+    "metrics.metrics.metric.pod": [
+      "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "spark-pi-85f51ba1afdfd5f3-exec-1",
+      "spark-pi-85f51ba1afdfd5f3-exec-1"
+    ],
+    "metrics.metrics.metric.unit": [
+      "core",
+      "byte",
+      "core",
+      "byte"
+    ],
+    "metrics.windowStart": [
+      "2026-11-06T08:00:58.000Z"
+    ],
+    "metrics.metrics.values.Timestamp": [
+      1793952088,
+      1793952088,
+      1793952088,
+      1793952088,
+      1793952088,
+      1793952088,
+      1793952088,
+      1793952088,
+      1793952088,
+      1793952088,
+      1793952088,
+      1793952088,
+      1793952088,
+      1793952088,
+      1793952088
+    ],
+    "metrics.metrics.metric.__name__": [
+      "container_cpu_usage_seconds_total",
+      "container_cpu_usage_seconds_total",
+      "container_cpu_usage_seconds_total",
+      "container_memory_working_set_bytes",
+      "container_memory_working_set_bytes",
+      "container_memory_working_set_bytes",
+      "kube_pod_container_resource_limits",
+      "kube_pod_container_resource_limits",
+      "kube_pod_container_resource_requests",
+      "kube_pod_container_resource_requests"
+    ],
+    "metrics.node": [
+      "yunikorn-cluster-worker"
+    ],
+    "metrics.metrics.metric.endpoint": [
+      "https-metrics",
+      "https-metrics",
+      "https-metrics",
+      "https-metrics",
+      "https-metrics",
+      "https-metrics",
+      "https-metrics",
+      "https-metrics",
+      "https-metrics",
+      "https-metrics",
+      "https-metrics",
+      "http",
+      "http",
+      "http",
+      "http"
+    ],
+    "metrics.metrics.metric.metrics_path": [
+      "/metrics/cadvisor",
+      "/metrics/cadvisor",
+      "/metrics/cadvisor",
+      "/metrics/cadvisor",
+      "/metrics/cadvisor",
+      "/metrics/cadvisor",
+      "/metrics/cadvisor",
+      "/metrics/cadvisor",
+      "/metrics/cadvisor",
+      "/metrics/cadvisor",
+      "/metrics/cadvisor"
+    ],
+    "@timestamp": [
+      "2026-11-06T08:01:30.474Z"
+    ],
+    "metrics.metrics.metric.cpu": [
+      "total",
+      "total",
+      "total",
+      "total",
+      "total"
+    ],
+    "metrics.metrics.metric.namespace": [
+      "default",
+      "default",
+      "default",
+      "default",
+      "default",
+      "default",
+      "default",
+      "default",
+      "default",
+      "default",
+      "default",
+      "default",
+      "default",
+      "default",
+      "default"
+    ],
+    "podName": [
+      "spark-pi-85f51ba1afdfd5f3-exec-1"
+    ],
+    "metrics.metrics.metric.container": [
+      "spark-kubernetes-executor",
+      "spark-kubernetes-executor",
+      "spark-kubernetes-executor",
+      "spark-kubernetes-executor",
+      "spark-kubernetes-executor",
+      "spark-kubernetes-executor",
+      "spark-kubernetes-executor",
+      "spark-kubernetes-executor"
+    ],
+    "applicationId": [
+      ""
+    ],
+    "metrics.applicationId": [
+      ""
+    ],
+    "metrics.role": [
+      ""
+    ]
+  }
+}
