@@ -24,6 +24,7 @@ import (
 	"podwatcher/internal/store"
 
 	es "github.com/elastic/go-elasticsearch/v8"
+	"github.com/elastic/go-elasticsearch/v8/esapi"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -165,7 +166,7 @@ func (c *Client) Publish(ctx context.Context, eventType string, pod *corev1.Pod,
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, c.index, id, body)
+	return c.write(ctx, c.index, id, false, body)
 }
 
 // Completion is distinct from Pod events and keeps status under application.
@@ -199,7 +200,7 @@ func (c *Client) PublishApplication(ctx context.Context, app store.ApplicationVi
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, c.index, id, body)
+	return c.write(ctx, c.index, id, false, body)
 }
 
 // PodMetrics is distinct from Pod events and Completion: it carries the
@@ -233,7 +234,7 @@ func (c *Client) PublishPodMetrics(ctx context.Context, doc podmetrics.PodMetric
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, c.metricsIndex, id, body)
+	return c.write(ctx, c.metricsIndex, id, true, body)
 }
 
 // PublishError carries the actual sanitized document for debug logging only.
@@ -260,7 +261,7 @@ func documentID(cluster string, now time.Time, parts ...any) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (c *Client) write(ctx context.Context, index, id string, body []byte) (err error) {
+func (c *Client) write(ctx context.Context, index, id string, create bool, body []byte) (err error) {
 	body, err = sanitizeDocument(body)
 	if err != nil {
 		return fmt.Errorf("sanitize Elasticsearch document: %w", err)
@@ -279,7 +280,21 @@ func (c *Client) write(ctx context.Context, index, id string, body []byte) (err 
 			}
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, c.timeout)
-		resp, requestErr := c.sdk.Index(index, bytes.NewReader(body), c.sdk.Index.WithDocumentID(id), c.sdk.Index.WithContext(attemptCtx))
+		// op_type=create is used for POD_METRICS so the documents can be
+		// written into a data stream; lifecycle events keep the default index
+		// op_type (upsert) to stay compatible with their existing index.
+		var resp *esapi.Response
+		var requestErr error
+		if create {
+			resp, requestErr = c.sdk.Index(index, bytes.NewReader(body),
+				c.sdk.Index.WithDocumentID(id),
+				c.sdk.Index.WithOpType("create"),
+				c.sdk.Index.WithContext(attemptCtx))
+		} else {
+			resp, requestErr = c.sdk.Index(index, bytes.NewReader(body),
+				c.sdk.Index.WithDocumentID(id),
+				c.sdk.Index.WithContext(attemptCtx))
+		}
 		if requestErr != nil {
 			cancel()
 			// Strip request URLs (which may contain credentials or query tokens),
@@ -295,6 +310,13 @@ func (c *Client) write(ctx context.Context, index, id string, body []byte) (err 
 		resp.Body.Close()
 		cancel()
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return nil
+		}
+		// With op_type=create, a 409 on a retry means the previous attempt
+		// already persisted the document (the client only timed out). The
+		// document is safely in place, so report success instead of a false
+		// failure. A 409 on the first attempt is still an error.
+		if create && resp.StatusCode == http.StatusConflict && attempt > 0 {
 			return nil
 		}
 		detail := responseErrorDetail(responseBody)
