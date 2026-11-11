@@ -166,7 +166,7 @@ func (c *Client) Publish(ctx context.Context, eventType string, pod *corev1.Pod,
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, c.index, id, false, body)
+	return c.write(ctx, "Publish", c.index, id, false, body)
 }
 
 // Completion is distinct from Pod events and keeps status under application.
@@ -200,7 +200,7 @@ func (c *Client) PublishApplication(ctx context.Context, app store.ApplicationVi
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, c.index, id, false, body)
+	return c.write(ctx, "PublishApplication", c.index, id, false, body)
 }
 
 // PodMetrics is distinct from Pod events and Completion: it carries the
@@ -234,7 +234,7 @@ func (c *Client) PublishPodMetrics(ctx context.Context, doc podmetrics.PodMetric
 	if err != nil {
 		return err
 	}
-	return c.write(ctx, c.metricsIndex, id, true, body)
+	return c.write(ctx, "PublishPodMetrics", c.metricsIndex, id, true, body)
 }
 
 // PublishError carries the actual sanitized document for debug logging only.
@@ -261,7 +261,7 @@ func documentID(cluster string, now time.Time, parts ...any) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (c *Client) write(ctx context.Context, index, id string, create bool, body []byte) (err error) {
+func (c *Client) write(ctx context.Context, caller, index, id string, create bool, body []byte) (err error) {
 	body, err = sanitizeDocument(body)
 	if err != nil {
 		return fmt.Errorf("sanitize Elasticsearch document: %w", err)
@@ -304,11 +304,13 @@ func (c *Client) write(ctx context.Context, index, id string, create bool, body 
 				requestErr = urlErr.Err
 			}
 			err = fmt.Errorf("Elasticsearch request failed (index=%s attempt=%d/3): %s", index, attempt+1, c.safeDetail(requestErr.Error()))
+			recordWriteStatus(ctx, caller, 0) // 0 = no HTTP response (network/TLS/timeout)
 			continue
 		}
 		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody+1))
 		resp.Body.Close()
 		cancel()
+		recordWriteStatus(ctx, caller, resp.StatusCode)
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return nil
 		}
