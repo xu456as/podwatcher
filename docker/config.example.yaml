@@ -92,6 +92,10 @@ podMetricsExport:
   workers: 2
   # Sampling step of the lifecycle range queries
   stepSeconds: 60
+  # Lifecycle-window threshold in minutes: pods that lived less than this are
+  # sampled every 30s so short-lived executors still yield several points;
+  # longer windows use stepSeconds above
+  shortWindowMinutes: 5
   # Export name -> query; each entry has an expr (PromQL template where
   # {namespace} and {pod} are substituted per deleted pod) and an optional
   # accumulate flag (replace per-step values with their running integral

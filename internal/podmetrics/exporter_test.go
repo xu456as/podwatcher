@@ -196,6 +196,43 @@ func TestExporterSizingOptions(t *testing.T) {
 	}
 }
 
+func TestWindowHistogramBuckets(t *testing.T) {
+	want := []float64{60, 300, 600, 1800, 3600, 7200, 18000, 36000, 86400, 172800, 432000}
+	if len(windowBuckets) != len(want) {
+		t.Fatalf("unexpected bucket count: got %d want %d", len(windowBuckets), len(want))
+	}
+	for i, w := range want {
+		if windowBuckets[i] != w {
+			t.Fatalf("bucket %d: got %v want %v", i, windowBuckets[i], w)
+		}
+		if i > 0 && windowBuckets[i] <= windowBuckets[i-1] {
+			t.Fatalf("buckets must be ascending: %v", windowBuckets)
+		}
+	}
+}
+
+func TestQueryStepSwitchesOnWindowThreshold(t *testing.T) {
+	e := NewExporter(&fakeQuerier{}, &fakeSink{docs: make(chan PodMetricsDocument, 1)},
+		WithStep(2*time.Minute), WithStepThreshold(5*time.Minute))
+	defer e.Stop()
+	if got := e.queryStep(4 * time.Minute); got != shortWindowStep {
+		t.Fatalf("short window must use the fine step, got %v", got)
+	}
+	if got := e.queryStep(5 * time.Minute); got != 2*time.Minute {
+		t.Fatalf("window at the threshold must use the configured step, got %v", got)
+	}
+	if got := e.queryStep(30 * time.Minute); got != 2*time.Minute {
+		t.Fatalf("long window must use the configured step, got %v", got)
+	}
+	// Non-positive thresholds keep the default.
+	d := NewExporter(&fakeQuerier{}, &fakeSink{docs: make(chan PodMetricsDocument, 1)},
+		WithStepThreshold(0))
+	defer d.Stop()
+	if d.stepThreshold != defaultStepThreshold {
+		t.Fatalf("invalid threshold must keep the default, got %v", d.stepThreshold)
+	}
+}
+
 func TestConfiguredQueriesAreRenderedPerPod(t *testing.T) {
 	e := NewExporter(&fakeQuerier{}, &fakeSink{docs: make(chan PodMetricsDocument, 1)},
 		WithQueries(map[string]QuerySpec{

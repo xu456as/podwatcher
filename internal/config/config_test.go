@@ -35,7 +35,7 @@ func TestElasticsearchDefaults(t *testing.T) {
 func TestPodMetricsExportDefaults(t *testing.T) {
 	cfg := DefaultConfig()
 	e := cfg.PodMetricsExport
-	if e.QueueSize != 256 || e.WorkerCount != 2 || e.StepSeconds != 60 {
+	if e.QueueSize != 256 || e.WorkerCount != 2 || e.StepSeconds != 60 || e.ShortWindowMinutes != 5 {
 		t.Fatalf("unexpected exporter defaults: %+v", e)
 	}
 	if e.Enabled {

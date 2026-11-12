@@ -153,12 +153,13 @@ func main() {
 			podmetrics.WithQueueSize(cfg.PodMetricsExport.QueueSize),
 			podmetrics.WithWorkers(cfg.PodMetricsExport.WorkerCount),
 			podmetrics.WithStep(time.Duration(cfg.PodMetricsExport.StepSeconds)*time.Second),
+			podmetrics.WithStepThreshold(time.Duration(cfg.PodMetricsExport.ShortWindowMinutes)*time.Minute),
 			podmetrics.WithQueries(queries),
 		)
 		handlerPublisher = &compositePublisher{events: esPublisher, podMetrics: podMetricsExporter}
 		podMetricsExporter.Start()
-		klog.Infof("Pod metrics export enabled: prometheus=%s index=%s stepSeconds=%d queries=%d queueSize=%d workers=%d",
-			cfg.Prometheus.Address, cfg.PodMetricsExport.Index, cfg.PodMetricsExport.StepSeconds, len(cfg.PodMetricsExport.Queries), cfg.PodMetricsExport.QueueSize, cfg.PodMetricsExport.WorkerCount)
+		klog.Infof("Pod metrics export enabled: prometheus=%s index=%s stepSeconds=%d shortWindowMinutes=%d queries=%d queueSize=%d workers=%d",
+			cfg.Prometheus.Address, cfg.PodMetricsExport.Index, cfg.PodMetricsExport.StepSeconds, cfg.PodMetricsExport.ShortWindowMinutes, len(cfg.PodMetricsExport.Queries), cfg.PodMetricsExport.QueueSize, cfg.PodMetricsExport.WorkerCount)
 	}
 	handlerOptions = append(handlerOptions, handler.WithPublisher(handlerPublisher))
 	eventHandler := handler.NewPodEventHandler(stateStore, handlerOptions...)
