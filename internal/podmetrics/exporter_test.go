@@ -196,6 +196,21 @@ func TestExporterSizingOptions(t *testing.T) {
 	}
 }
 
+func TestWindowHistogramBuckets(t *testing.T) {
+	want := []float64{60, 300, 600, 1800, 3600, 7200, 18000, 36000, 86400, 172800, 432000}
+	if len(windowBuckets) != len(want) {
+		t.Fatalf("unexpected bucket count: got %d want %d", len(windowBuckets), len(want))
+	}
+	for i, w := range want {
+		if windowBuckets[i] != w {
+			t.Fatalf("bucket %d: got %v want %v", i, windowBuckets[i], w)
+		}
+		if i > 0 && windowBuckets[i] <= windowBuckets[i-1] {
+			t.Fatalf("buckets must be ascending: %v", windowBuckets)
+		}
+	}
+}
+
 func TestQueryStepSwitchesOnWindowThreshold(t *testing.T) {
 	e := NewExporter(&fakeQuerier{}, &fakeSink{docs: make(chan PodMetricsDocument, 1)},
 		WithStep(2*time.Minute), WithStepThreshold(5*time.Minute))

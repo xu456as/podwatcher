@@ -41,6 +41,15 @@ const (
 	processTimeout = 5 * time.Minute
 )
 
+// windowBuckets are the explicit histogram boundaries (in seconds) for the
+// pod lifecycle-window distribution: 1min, 5min, 10min, 30min, 1h, 2h, 5h,
+// 10h, 1day, 2days, 5days.
+var windowBuckets = []float64{
+	1 * 60, 5 * 60, 10 * 60, 30 * 60,
+	1 * 3600, 2 * 3600, 5 * 3600, 10 * 3600,
+	24 * 3600, 48 * 3600, 5 * 24 * 3600,
+}
+
 // Option customizes the exporter sizing.
 type Option func(*Exporter)
 
@@ -169,6 +178,10 @@ type Exporter struct {
 	// durationHistogram records each export's wall-clock latency; nil when
 	// the global meter provider is not configured (OTel no-op).
 	durationHistogram metric.Float64Histogram
+	// windowHistogram records the distribution of exported pods' lifecycle
+	// windows (windowEnd - windowStart); nil only if instrument creation
+	// failed.
+	windowHistogram metric.Float64Histogram
 	// duration accumulates export latencies between metric collections; the
 	// gauges registered in initDurationMetrics take and clear it, so every
 	// scrape reports only the exports finished during its own interval.
@@ -196,6 +209,7 @@ func NewExporter(querier Querier, sink Sink, opts ...Option) *Exporter {
 	}
 	e.observeQueueDepth()
 	e.initHistogram()
+	e.initWindowHistogram()
 	e.initDurationMetrics()
 	return e
 }
@@ -258,6 +272,26 @@ func (e *Exporter) initHistogram() {
 		return
 	}
 	e.durationHistogram = h
+}
+
+// initWindowHistogram creates a histogram over exported pods' lifecycle
+// windows (windowEnd - windowStart) with the explicit windowBuckets
+// boundaries, so the distribution of short-lived executors vs long-running
+// drivers is visible per scrape. Recorded after the empty-window check, so
+// skipped pods do not count.
+func (e *Exporter) initWindowHistogram() {
+	meter := otel.Meter("podwatcher")
+	h, err := meter.Float64Histogram(
+		"podwatcher.podmetrics.window.duration",
+		metric.WithDescription("Distribution of exported pods' lifecycle windows (windowEnd - windowStart)"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(windowBuckets...),
+	)
+	if err != nil {
+		klog.Warningf("Failed to create pod metrics window duration histogram: %v", err)
+		return
+	}
+	e.windowHistogram = h
 }
 
 // durationStats aggregates export latencies between metric collections. The
@@ -420,6 +454,9 @@ func (e *Exporter) process(pod *corev1.Pod) {
 		klog.Warningf("Pod metrics export skipped for %s: empty lifecycle window (start=%v end=%v)",
 			podIdentity(pod), start, end)
 		return
+	}
+	if e.windowHistogram != nil {
+		e.windowHistogram.Record(ctx, end.Sub(start).Seconds())
 	}
 	step := e.queryStep(end.Sub(start))
 	queries := e.buildQueries(pod)
