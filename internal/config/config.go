@@ -84,6 +84,12 @@ type PodMetricsExportConfig struct {
 	QueueSize   int    `yaml:"queueSize"` // pending pod exports buffered before new ones are dropped
 	WorkerCount int    `yaml:"workers"`   // concurrent export workers
 	StepSeconds int    `yaml:"stepSeconds"`
+	// ShortWindowMinutes is the lifecycle-window threshold, in minutes. Pods
+	// whose window is shorter are sampled with a fixed 30s step so short-lived
+	// executors still yield several points; longer windows use StepSeconds to
+	// bound the number of samples per query. Non-positive values fall back to
+	// the exporter default.
+	ShortWindowMinutes int `yaml:"shortWindowMinutes"`
 	// Queries maps an export name to its query. Entries merge with the
 	// built-in defaults, so one added entry exports one more metric.
 	Queries map[string]PodMetricsQuery `yaml:"queries"`
@@ -132,6 +138,8 @@ func DefaultConfig() *Config {
 			QueueSize:   256,
 			WorkerCount: 2,
 			StepSeconds: 60,
+			// Windows under five minutes get the exporter's fixed 30s step.
+			ShortWindowMinutes: 5,
 			Queries: map[string]PodMetricsQuery{
 				// The Spark main container is always named "main", so exact
 				// container matching yields one series per query — no summing,

@@ -196,6 +196,28 @@ func TestExporterSizingOptions(t *testing.T) {
 	}
 }
 
+func TestQueryStepSwitchesOnWindowThreshold(t *testing.T) {
+	e := NewExporter(&fakeQuerier{}, &fakeSink{docs: make(chan PodMetricsDocument, 1)},
+		WithStep(2*time.Minute), WithStepThreshold(5*time.Minute))
+	defer e.Stop()
+	if got := e.queryStep(4 * time.Minute); got != shortWindowStep {
+		t.Fatalf("short window must use the fine step, got %v", got)
+	}
+	if got := e.queryStep(5 * time.Minute); got != 2*time.Minute {
+		t.Fatalf("window at the threshold must use the configured step, got %v", got)
+	}
+	if got := e.queryStep(30 * time.Minute); got != 2*time.Minute {
+		t.Fatalf("long window must use the configured step, got %v", got)
+	}
+	// Non-positive thresholds keep the default.
+	d := NewExporter(&fakeQuerier{}, &fakeSink{docs: make(chan PodMetricsDocument, 1)},
+		WithStepThreshold(0))
+	defer d.Stop()
+	if d.stepThreshold != defaultStepThreshold {
+		t.Fatalf("invalid threshold must keep the default, got %v", d.stepThreshold)
+	}
+}
+
 func TestConfiguredQueriesAreRenderedPerPod(t *testing.T) {
 	e := NewExporter(&fakeQuerier{}, &fakeSink{docs: make(chan PodMetricsDocument, 1)},
 		WithQueries(map[string]QuerySpec{

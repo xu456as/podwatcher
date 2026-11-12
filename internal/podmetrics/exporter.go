@@ -31,6 +31,12 @@ const (
 	defaultQueueSize = 256
 	defaultWorkers   = 2
 	defaultStep      = time.Minute
+	// shortWindowStep samples pods whose lifecycle window is under the
+	// configured threshold, so a short-lived executor still yields a few
+	// points instead of one or two.
+	shortWindowStep = 30 * time.Second
+	// defaultStepThreshold applies when the configuration sets no threshold.
+	defaultStepThreshold = 5 * time.Minute
 	// Whole-export budget: several range queries plus one index request.
 	processTimeout = 5 * time.Minute
 )
@@ -64,6 +70,17 @@ func WithStep(d time.Duration) Option {
 	return func(e *Exporter) {
 		if d > 0 {
 			e.step = d
+		}
+	}
+}
+
+// WithStepThreshold sets the lifecycle-window length below which queries use
+// a fixed 30s step instead of the configured step; non-positive values keep
+// the default.
+func WithStepThreshold(d time.Duration) Option {
+	return func(e *Exporter) {
+		if d > 0 {
+			e.stepThreshold = d
 		}
 	}
 }
@@ -134,6 +151,9 @@ type Exporter struct {
 	// sampling interval.
 	queries map[string]QuerySpec
 	step    time.Duration
+	// stepThreshold is the lifecycle-window length below which queries use
+	// shortWindowStep instead of step.
+	stepThreshold time.Duration
 	// inflight deduplicates re-delivered OnDelete events while a pod is
 	// queued or being processed. After completion, a redelivery exports the
 	// pod again and the sink inserts a second document; the two records are
@@ -149,19 +169,24 @@ type Exporter struct {
 	// durationHistogram records each export's wall-clock latency; nil when
 	// the global meter provider is not configured (OTel no-op).
 	durationHistogram metric.Float64Histogram
+	// duration accumulates export latencies between metric collections; the
+	// gauges registered in initDurationMetrics take and clear it, so every
+	// scrape reports only the exports finished during its own interval.
+	duration durationStats
 }
 
 // NewExporter builds an exporter; call Start to launch the workers.
 func NewExporter(querier Querier, sink Sink, opts ...Option) *Exporter {
 	ctx, cancel := context.WithCancel(context.Background())
 	e := &Exporter{
-		querier: querier,
-		sink:    sink,
-		queue:   make(chan *corev1.Pod, defaultQueueSize),
-		workers: defaultWorkers,
-		step:    defaultStep,
-		ctx:     ctx,
-		cancel:  cancel,
+		querier:       querier,
+		sink:          sink,
+		queue:         make(chan *corev1.Pod, defaultQueueSize),
+		workers:       defaultWorkers,
+		step:          defaultStep,
+		stepThreshold: defaultStepThreshold,
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -171,6 +196,7 @@ func NewExporter(querier Querier, sink Sink, opts ...Option) *Exporter {
 	}
 	e.observeQueueDepth()
 	e.initHistogram()
+	e.initDurationMetrics()
 	return e
 }
 
@@ -216,10 +242,10 @@ func (e *Exporter) observeQueueDepth() {
 // initHistogram creates a histogram recording the end-to-end export latency
 // for each pod: range queries + optional accumulation + Elasticsearch write.
 // The OTel SDK's default bucket boundaries (under 10s) are a reasonable fit
-// for Prometheus range queries; Prometheus OTLP exporters automatically
-// compute p50/p90/p99 from histogram buckets. Returns nil in no-op mode, so
-// callers can safely e.durationHistogram.Record(ctx, d) — the SDK treats nil
-// receivers as no-ops.
+// for Prometheus range queries. Its _count and _sum are cumulative across
+// scrapes, which is why initDurationMetrics adds per-interval gauges next to
+// it; callers can safely e.durationHistogram.Record(ctx, d) — a nil
+// histogram in no-op mode would panic, hence the nil check at the call site.
 func (e *Exporter) initHistogram() {
 	meter := otel.Meter("podwatcher")
 	h, err := meter.Float64Histogram(
@@ -232,6 +258,87 @@ func (e *Exporter) initHistogram() {
 		return
 	}
 	e.durationHistogram = h
+}
+
+// durationStats aggregates export latencies between metric collections. The
+// observable gauges in initDurationMetrics take and clear these values on
+// every collection, so each scrape reports only the exports that finished
+// during the current interval.
+type durationStats struct {
+	mu    sync.Mutex
+	count int64
+	sum   float64
+	peak  float64
+}
+
+// observe adds one finished export's wall-clock seconds to the interval.
+func (s *durationStats) observe(seconds float64) {
+	s.mu.Lock()
+	s.count++
+	s.sum += seconds
+	if seconds > s.peak {
+		s.peak = seconds
+	}
+	s.mu.Unlock()
+}
+
+// take returns the interval aggregates and resets them. The caller becomes
+// the sole owner of the data, so with several MeterProvider readers only the
+// first collection would see it.
+func (s *durationStats) take() (count int64, sum, peak float64) {
+	s.mu.Lock()
+	count, sum, peak = s.count, s.sum, s.peak
+	s.count, s.sum, s.peak = 0, 0, 0
+	s.mu.Unlock()
+	return count, sum, peak
+}
+
+// initDurationMetrics registers per-interval observable gauges next to the
+// histogram from initHistogram: how many exports finished since the previous
+// collection, their total wall-clock seconds, and the slowest one. The
+// histogram's _count and _sum are cumulative and keep growing across scrapes
+// even when no export runs, so these gauges complement it with samples that
+// are independent — each describes only its own interval. They use their own
+// names because the histogram already occupies export.duration.count/sum.
+// Without a configured meter provider the instruments are no-ops and nothing
+// is collected.
+func (e *Exporter) initDurationMetrics() {
+	meter := otel.Meter("podwatcher")
+	countGauge, err := meter.Int64ObservableGauge(
+		"podwatcher.podmetrics.export.interval.count",
+		metric.WithDescription("Pod metrics exports completed since the previous collection"),
+	)
+	if err != nil {
+		klog.Warningf("Failed to create pod metrics export duration count gauge: %v", err)
+		return
+	}
+	sumGauge, err := meter.Float64ObservableGauge(
+		"podwatcher.podmetrics.export.interval.duration.sum",
+		metric.WithDescription("Total wall-clock seconds spent on pod metrics exports since the previous collection"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		klog.Warningf("Failed to create pod metrics export duration sum gauge: %v", err)
+		return
+	}
+	peakGauge, err := meter.Float64ObservableGauge(
+		"podwatcher.podmetrics.export.interval.duration.max",
+		metric.WithDescription("Slowest pod metrics export (range queries + accumulation + ES write) since the previous collection"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		klog.Warningf("Failed to create pod metrics export duration max gauge: %v", err)
+		return
+	}
+	if _, err := meter.RegisterCallback(func(_ context.Context, observer metric.Observer) error {
+		count, sum, peak := e.duration.take()
+		observer.ObserveInt64(countGauge, count)
+		observer.ObserveFloat64(sumGauge, sum)
+		observer.ObserveFloat64(peakGauge, peak)
+		return nil
+	}, countGauge, sumGauge, peakGauge); err != nil {
+		klog.Warningf("Failed to register pod metrics export duration callback: %v", err)
+	}
 }
 
 // PublishPodMetrics accepts a deleted pod for export. It only snapshots the
@@ -301,9 +408,11 @@ func (e *Exporter) process(pod *corev1.Pod) {
 	ctx, cancel := context.WithTimeout(e.ctx, processTimeout)
 	defer cancel()
 	defer func() {
+		elapsed := time.Since(exportStart).Seconds()
 		if e.durationHistogram != nil {
-			e.durationHistogram.Record(ctx, time.Since(exportStart).Seconds())
+			e.durationHistogram.Record(ctx, elapsed)
 		}
+		e.duration.observe(elapsed)
 	}()
 
 	start, end := lifecycleWindow(pod)
@@ -312,6 +421,7 @@ func (e *Exporter) process(pod *corev1.Pod) {
 			podIdentity(pod), start, end)
 		return
 	}
+	step := e.queryStep(end.Sub(start))
 	queries := e.buildQueries(pod)
 	if len(queries) == 0 {
 		klog.Infof("Pod metrics export has no queries configured, skipping %s/%s", pod.Namespace, pod.Name)
@@ -336,7 +446,7 @@ func (e *Exporter) process(pod *corev1.Pod) {
 	sort.Strings(names)
 	for _, name := range names {
 		spec := queries[name]
-		results, err := e.querier.QueryRange(ctx, spec.Expr, start, end, e.step)
+		results, err := e.querier.QueryRange(ctx, spec.Expr, start, end, step)
 		if err != nil {
 			// IO-layer failure: abort this pod's export. Prometheus error is
 			// persistent (server unreachable / auth / expression invalid), so
@@ -345,7 +455,7 @@ func (e *Exporter) process(pod *corev1.Pod) {
 			return
 		}
 		if spec.Accumulate {
-			results, err = accumulate(results, e.step)
+			results, err = accumulate(results, step)
 			if err != nil {
 				// Compute-layer failure: isolate. A non-finite sample inside
 				// one series doesn't invalidate the others (or the other
@@ -367,6 +477,17 @@ func (e *Exporter) process(pod *corev1.Pod) {
 		klog.Errorf("Failed to publish pod metrics for %s/%s: %v", pod.Namespace, pod.Name, err)
 		return
 	}
+}
+
+// queryStep returns the range-query step for one lifecycle window. A window
+// shorter than stepThreshold is sampled every shortWindowStep so short-lived
+// pods still produce several points; longer windows use the configured step
+// to bound the number of samples per query.
+func (e *Exporter) queryStep(window time.Duration) time.Duration {
+	if window < e.stepThreshold {
+		return shortWindowStep
+	}
+	return e.step
 }
 
 // lifecycleWindow bounds the Prometheus range query. The window ends at the
