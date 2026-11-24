@@ -55,8 +55,13 @@ func TestApplicationCompletionPublishing(t *testing.T) {
 			if len(p.applications) != 1 || p.applications[0].FinishedAt == nil || !p.applications[0].FinishedAt.Equal(finished) {
 				t.Fatalf("incorrect completion: %+v", p.applications)
 			}
+			// OnDelete for the same pod must NOT re-issue the terminal fanout:
+			// the store gets its deleted flag but the sinks stay at one doc each.
 			h.OnDelete(terminal)
-			if len(p.applications) != 2 || !p.applications[1].FinishedAt.Equal(finished) {
+			if len(p.applications) != 1 {
+				t.Fatalf("delete after terminal-publish must not duplicate completion, got %d", len(p.applications))
+			}
+			if p.applications[0].FinishedAt == nil || !p.applications[0].FinishedAt.Equal(finished) {
 				t.Fatal("delete must preserve completion time")
 			}
 		})
@@ -151,6 +156,148 @@ func TestPodMetricsExportTriggeredOnDelete(t *testing.T) {
 	if len(p.pods) != 2 || p.pods[1].Name != "app-m-driver" {
 		t.Fatalf("driver deletion must trigger metrics export, got %+v", p.pods)
 	}
+}
+
+// TestTerminalEarlyPublishCoversDriverOnly confirms that driver pods fire
+// their terminal fanout (ES "DELETED" event + metrics export + application
+// completion) the moment they transit into Succeeded/Failed — before the
+// Kubernetes API server actually deletes the object. Executors deliberately
+// don't use this path; see the next test for that behaviour.
+func TestTerminalEarlyPublishCoversDriverOnly(t *testing.T) {
+	s := store.NewStore("", 0, 0)
+	defer s.Stop()
+	combined := &threeInOnePublisher{}
+	h := NewPodEventHandler(s, WithPublisher(combined))
+
+	running := testutil.DriverPod("term-driver", "app-x", corev1.PodRunning, time.Now())
+	terminal := running.DeepCopy()
+	terminal.Status.Phase = corev1.PodFailed
+
+	h.OnAdd(running, false)
+	if len(combined.events) != 1 || combined.events[0].kind != "ADDED" {
+		t.Fatalf("expected 1 ADDED event, got %+v", combined.events)
+	}
+
+	// Driver terminal OnUpdate fires the early fanout and publishes
+	// application completion (the preceding publishApplication call sees
+	// FinishedAt populated by UpsertPod).
+	h.OnUpdate(running, terminal)
+	if len(combined.events) != 2 || combined.events[1].kind != "DELETED" {
+		t.Fatalf("driver terminal OnUpdate must emit DELETED, got %+v", combined.events)
+	}
+	if len(combined.podMetrics) != 1 {
+		t.Fatalf("driver terminal OnUpdate must enqueue metrics export, got %+v", combined.podMetrics)
+	}
+	if len(combined.applications) != 1 {
+		t.Fatalf("driver terminal OnUpdate must publish completion, got %+v", combined.applications)
+	}
+
+	// OnDelete must NOT re-fire the terminal fanout (sync.Map idempotency
+	// was consumed above).
+	h.OnDelete(terminal)
+	if len(combined.events) != 2 {
+		t.Fatalf("OnDelete after terminal must not duplicate DELETED, got %+v", combined.events)
+	}
+	if len(combined.podMetrics) != 1 {
+		t.Fatalf("OnDelete after terminal must not duplicate metrics, got %+v", combined.podMetrics)
+	}
+	if len(combined.applications) != 1 {
+		t.Fatalf("OnDelete after terminal must not duplicate completion, got %+v", combined.applications)
+	}
+
+	// But OnDelete still writes the store's deleted flag.
+	apps, _ := h.GetApplications(time.Time{}, 0, "app-x", nil)
+	if len(apps) != 1 || apps[0].Status != "deleted" || apps[0].DeletedAt == nil {
+		t.Fatalf("OnDelete must still mark application deleted, got %+v", apps)
+	}
+}
+
+// TestExecutorSkipsEarlyPublish verifies that executor pods do NOT fire the
+// early terminal fanout — they only publish from OnDelete. This is intentional:
+// executor churn is frequent and the terminal-publish optimisation is driver-only.
+func TestExecutorSkipsEarlyPublish(t *testing.T) {
+	s := store.NewStore("", 0, 0)
+	defer s.Stop()
+	combined := &threeInOnePublisher{}
+	h := NewPodEventHandler(s, WithPublisher(combined))
+
+	running := testutil.ExecutorPod("term-exec", "app-x")
+	running.Status.Phase = corev1.PodRunning
+	terminal := running.DeepCopy()
+	terminal.Status.Phase = corev1.PodFailed
+
+	h.OnAdd(running, false)
+	h.OnUpdate(running, terminal)
+
+	// Executor terminal OnUpdate fires NO fanout — only OnAdd's ADDED.
+	if len(combined.events) != 1 {
+		t.Fatalf("executor terminal OnUpdate must NOT emit early DELETED, got %+v", combined.events)
+	}
+	if len(combined.podMetrics) != 0 {
+		t.Fatalf("executor terminal OnUpdate must NOT enqueue metrics, got %+v", combined.podMetrics)
+	}
+
+	// OnDelete is the normal publish trigger for executors.
+	h.OnDelete(terminal)
+	if len(combined.events) != 2 || combined.events[1].kind != "DELETED" {
+		t.Fatalf("executor OnDelete must emit DELETED, got %+v", combined.events)
+	}
+	if len(combined.podMetrics) != 1 {
+		t.Fatalf("executor OnDelete must enqueue metrics, got %+v", combined.podMetrics)
+	}
+}
+
+// TestTerminalNotifiedIsIdempotent verifies that multiple OnUpdate calls for
+// the same driver landing in the terminal phase (e.g. Failed → Failed) do not
+// keep re-firing the terminal fanout. Executors don't participate in this
+// path (covered by TestExecutorSkipsEarlyPublish).
+func TestTerminalNotifiedIsIdempotent(t *testing.T) {
+	s := store.NewStore("", 0, 0)
+	defer s.Stop()
+	combined := &threeInOnePublisher{}
+	h := NewPodEventHandler(s, WithPublisher(combined))
+
+	first := testutil.DriverPod("twice-driver", "app-y", corev1.PodRunning, time.Now())
+	terminal := first.DeepCopy()
+	terminal.Status.Phase = corev1.PodFailed
+	again := terminal.DeepCopy()
+	again.ResourceVersion = "2"
+
+	h.OnAdd(first, false)
+	h.OnUpdate(first, terminal)
+	h.OnUpdate(terminal, again) // Failed → Failed, phase unchanged — second LoadOrStore returns loaded=true
+
+	if got := len(combined.events); got != 2 { // ADDED + DELETED (first terminal only)
+		t.Fatalf("phase-stable re-update must not re-fire terminal publish, events=%d", got)
+	}
+	if got := len(combined.podMetrics); got != 1 {
+		t.Fatalf("phase-stable re-update must not re-export metrics, podMetrics=%d", got)
+	}
+
+	// And OnDelete still doesn't double (Load+Delete shows it was consumed).
+	h.OnDelete(again)
+	if got := len(combined.events); got != 2 {
+		t.Fatalf("OnDelete after two terminal updates must not emit again, events=%d", got)
+	}
+	if got := len(combined.podMetrics); got != 1 {
+		t.Fatalf("OnDelete after two terminal updates must not re-export metrics, podMetrics=%d", got)
+	}
+}
+
+type threeInOnePublisher struct {
+	testPublisher
+	podMetrics   []*corev1.Pod
+	applications []store.ApplicationView
+}
+
+func (p *threeInOnePublisher) PublishPodMetrics(_ context.Context, pod *corev1.Pod) error {
+	p.podMetrics = append(p.podMetrics, pod)
+	return nil
+}
+
+func (p *threeInOnePublisher) PublishApplication(_ context.Context, app store.ApplicationView) error {
+	p.applications = append(p.applications, app)
+	return nil
 }
 
 func newTestHandler() *PodEventHandler {

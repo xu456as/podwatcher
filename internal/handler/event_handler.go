@@ -8,6 +8,9 @@ import (
 
 	"podwatcher/internal/store"
 
+	"go.opentelemetry.io/otel"
+	otelmetric "go.opentelemetry.io/otel/metric"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -24,6 +27,13 @@ type PodEvent struct {
 	Timestamp time.Time         `json:"timestamp"`
 }
 
+// terminalEntry stores when a driver fired its terminal publish. The value is
+// a timestamp so the periodic TTL sweep can drop stale entries whose OnDelete
+// never arrived (watch disconnect, Kubelet crash before GC, etc.).
+type terminalEntry struct {
+	firedAt time.Time
+}
+
 // PodEventHandler receives pod events from the informer. It tracks Spark
 // driver and executor pods (spark-role=driver|executor) into two stores:
 // applications are credentials for log analysis, pod records are coordinates
@@ -36,7 +46,33 @@ type PodEventHandler struct {
 	stateStore *store.Store
 	publisher  EventPublisher
 	isDebug    bool
+
+	// terminalNotified records driver pods whose terminal-publish suite (ES
+	// DELETED event + ES application completion + Prometheus/ES pod-metrics
+	// export) was already fired from an OnUpdate (Succeeded/Failed) transition.
+	// Later OnDelete calls for the same pod must skip the fanout or every sink
+	// (which writes a new immutable document per call) ends up with duplicates.
+	//
+	// Entries are normally consumed and deleted in OnDelete seconds to minutes
+	// after they were written. A periodic goroutine sweeps out entries older
+	// than terminalNotifiedTTL as a safety valve for cases where OnDelete
+	// never arrives — so the map never grows unboundedly.
+	terminalNotified sync.Map // key: pod identity string, value: terminalEntry
+
+	// terminalNotifiedGauge reports the current terminalNotified size. It is
+	// recorded at the end of each TTL sweep, reusing the Range pass that the
+	// sweep already performs — no extra O(n) cost on the hot path and no
+	// observable-gauge callback goroutine to manage.
+	terminalNotifiedGauge otelmetric.Int64Gauge
+
+	// stopCh terminates the periodic TTL sweep goroutine on handler shutdown.
+	stopCh chan struct{}
 }
+
+const (
+	defaultTerminalNotifiedTTL     = 24 * time.Hour
+	defaultTerminalNotifiedSweep   = 4 * time.Hour // ~6 times a day
+)
 
 type EventPublisher interface {
 	Publish(context.Context, string, *corev1.Pod, bool) error
@@ -57,11 +93,80 @@ func NewPodEventHandler(stateStore *store.Store, opts ...Option) *PodEventHandle
 		events:     make([]PodEvent, 0),
 		maxEvents:  1000,
 		stateStore: stateStore,
+		stopCh:     make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(h)
 	}
+	h.registerTerminalNotifiedGauge()
+	go h.terminalSweepLoop()
 	return h
+}
+
+// registerTerminalNotifiedGauge creates a synchronous Int64Gauge. Size is
+// recorded inside terminalSweepLoop (same Range pass that does TTL cleanup),
+// so there's no extra O(n) scan and no observable-gauge callback.
+func (h *PodEventHandler) registerTerminalNotifiedGauge() {
+	meter := otel.Meter("podwatcher/handler")
+	gauge, err := meter.Int64Gauge(
+		"podwatcher.handler.terminal_notified",
+		otelmetric.WithDescription("Driver pods tracked in terminalNotified — a safety-valve set that should normally be empty or very small"),
+	)
+	if err != nil {
+		klog.Warningf("Failed to create terminal_notified gauge: %v", err)
+		return
+	}
+	h.terminalNotifiedGauge = gauge
+}
+
+// Stop terminates the periodic TTL sweep. Safe to call once; subsequent calls
+// are no-ops.
+func (h *PodEventHandler) Stop() {
+	select {
+	case <-h.stopCh:
+	default:
+		close(h.stopCh)
+	}
+}
+
+// terminalSweepLoop periodically drops terminalNotified entries older than
+// terminalNotifiedTTL and records the current map size into the OTel gauge.
+// The size is collected inside the same Range pass that does cleanup, so the
+// sweep's one O(n) scan is shared between both concerns — no extra Range on
+// the hot path and no observable-gauge callback goroutine.
+func (h *PodEventHandler) terminalSweepLoop() {
+	ticker := time.NewTicker(defaultTerminalNotifiedSweep)
+	defer ticker.Stop()
+	ctx := context.Background()
+	for {
+		select {
+		case <-h.stopCh:
+			return
+		case now := <-ticker.C:
+			cutoff := now.Add(-defaultTerminalNotifiedTTL)
+			evicted := 0
+			remaining := int64(0)
+			h.terminalNotified.Range(func(key, value interface{}) bool {
+				entry, ok := value.(terminalEntry)
+				if !ok || entry.firedAt.Before(cutoff) {
+					h.terminalNotified.Delete(key)
+					evicted++
+				} else {
+					remaining++
+				}
+				return true
+			})
+			if h.terminalNotifiedGauge != nil {
+				h.terminalNotifiedGauge.Record(ctx, remaining)
+			}
+			if evicted > 0 {
+				klog.Infof("terminalNotified sweep: evicted %d entries older than %s (remaining=%d)",
+					evicted, defaultTerminalNotifiedTTL, remaining)
+			} else if remaining > 0 {
+				klog.V(4).Infof("terminalNotified sweep: no evictions, %d entries remain", remaining)
+			}
+		}
+	}
 }
 
 func (h *PodEventHandler) OnAdd(obj interface{}, isInInitialList bool) {
@@ -125,11 +230,32 @@ func (h *PodEventHandler) OnUpdate(oldObj, newObj interface{}) {
 	h.stateStore.UpsertPod(newPod, false)
 	h.publishApplication(newPod)
 
+	isTerminal := newPod.Status.Phase == corev1.PodSucceeded || newPod.Status.Phase == corev1.PodFailed
+	phaseChanged := oldPod.Status.Phase != newPod.Status.Phase
+
+	// Driver-only: a driver reaching Succeeded/Failed has stopped consuming
+	// cluster resources, so this is the earliest safe moment to fire the
+	// terminal fanout that OnDelete normally owns — the ES "DELETED" event
+	// and the Prometheus/ES pod-metrics export. publishApplication is NOT
+	// duplicated here; the preceding call in the OnUpdate path already fires
+	// it once (guarded by FinishedAt != nil, which UpsertPod just populated).
+	// sync.Map idempotency keeps OnDelete from firing its own fanout later;
+	// the entry is consumed there or swept out by the periodic TTL goroutine.
+	if role == "driver" && isTerminal && phaseChanged {
+		now := time.Now()
+		key := podKey(newPod)
+		if _, loaded := h.terminalNotified.LoadOrStore(key, terminalEntry{firedAt: now}); !loaded {
+			h.publish("DELETED", newPod, false)
+			h.publishPodMetrics(newPod)
+			klog.Infof("[POD TERMINAL] %s/%s phase=%s applicationId=%s",
+				newPod.Namespace, newPod.Name, newPod.Status.Phase, store.AppIDFromPod(newPod))
+		}
+	}
+
 	// The diagnostic stream records a driver lifecycle event only on the
 	// transition to a terminal phase (Succeeded/Failed) to avoid noise from
 	// intermediate updates.
-	if role != "driver" || oldPod.Status.Phase == newPod.Status.Phase ||
-		(newPod.Status.Phase != corev1.PodSucceeded && newPod.Status.Phase != corev1.PodFailed) {
+	if role != "driver" || !isTerminal || !phaseChanged {
 		return
 	}
 
@@ -159,13 +285,21 @@ func (h *PodEventHandler) OnDelete(obj interface{}) {
 	}
 
 	h.stateStore.UpsertPod(pod, true)
-	h.publish("DELETED", pod, false)
-	h.publishApplication(pod)
 
-	// The pod's lifecycle is over: hand it to the optional async metrics
-	// exporter for its final resource-usage record. Both drivers and
-	// executors are exported.
-	h.publishPodMetrics(pod)
+	// Driver-only idempotency: if this driver already fired its terminal
+	// fanout from an earlier OnUpdate (Succeeded/Failed transition), skip
+	// and consume the entry. Executors don't participate in the advance-publish
+	// path so they fall through to the normal three-publish call.
+	key := podKey(pod)
+	if _, loaded := h.terminalNotified.Load(key); loaded && role == "driver" {
+		h.terminalNotified.Delete(key)
+		klog.Infof("[POD DELETED] %s/%s phase=%s (terminal fanout already sent, skipping)",
+			pod.Namespace, pod.Name, pod.Status.Phase)
+	} else {
+		h.publish("DELETED", pod, false)
+		h.publishApplication(pod)
+		h.publishPodMetrics(pod)
+	}
 
 	if role != "driver" {
 		return
@@ -274,6 +408,15 @@ func podFromObject(obj interface{}) (*corev1.Pod, bool) {
 	}
 	pod, ok := tombstone.Obj.(*corev1.Pod)
 	return pod, ok
+}
+
+// podKey returns the identity shared by Elasticsearch, the metrics exporter
+// and terminalNotified. UID first, falling back to namespace/name.
+func podKey(pod *corev1.Pod) string {
+	if pod.UID != "" {
+		return string(pod.UID)
+	}
+	return pod.Namespace + "/" + pod.Name
 }
 
 func (h *PodEventHandler) addEvent(event PodEvent) {
