@@ -228,24 +228,25 @@ func (h *PodEventHandler) OnUpdate(oldObj, newObj interface{}) {
 
 	// Keep the state current on every tracked pod change.
 	h.stateStore.UpsertPod(newPod, false)
-	h.publishApplication(newPod)
 
 	isTerminal := newPod.Status.Phase == corev1.PodSucceeded || newPod.Status.Phase == corev1.PodFailed
 	phaseChanged := oldPod.Status.Phase != newPod.Status.Phase
 
 	// Driver-only: a driver reaching Succeeded/Failed has stopped consuming
 	// cluster resources, so this is the earliest safe moment to fire the
-	// terminal fanout that OnDelete normally owns — the ES "DELETED" event
-	// and the Prometheus/ES pod-metrics export. publishApplication is NOT
-	// duplicated here; the preceding call in the OnUpdate path already fires
-	// it once (guarded by FinishedAt != nil, which UpsertPod just populated).
-	// sync.Map idempotency keeps OnDelete from firing its own fanout later;
-	// the entry is consumed there or swept out by the periodic TTL goroutine.
+	// terminal fanout that OnDelete normally owns — ES "DELETED", ES
+	// application completion, and Prometheus/ES pod-metrics. All three
+	// publishes are grouped here (and nowhere else in OnUpdate) so that
+	// failed/succeeded pods receiving further OnUpdate events (annotation
+	// changes, deletionTimestamp, etc.) do not re-issue any of them; FinishedAt
+	// is only written once by the store and the terminalNotified map keeps
+	// OnDelete from firing its own fanout later.
 	if role == "driver" && isTerminal && phaseChanged {
 		now := time.Now()
 		key := podKey(newPod)
 		if _, loaded := h.terminalNotified.LoadOrStore(key, terminalEntry{firedAt: now}); !loaded {
 			h.publish("DELETED", newPod, false)
+			h.publishApplication(newPod)
 			h.publishPodMetrics(newPod)
 			klog.Infof("[POD TERMINAL] %s/%s phase=%s applicationId=%s",
 				newPod.Namespace, newPod.Name, newPod.Status.Phase, store.AppIDFromPod(newPod))
